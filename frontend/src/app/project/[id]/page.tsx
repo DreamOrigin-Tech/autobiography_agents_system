@@ -89,7 +89,7 @@ export default function ProjectDashboard() {
               <h2 className="mt-2 text-lg font-semibold text-[#1e1b4b]">写作风格</h2>
               <p className="mt-1 text-sm text-[#6b6889]">设定自传的语气和风格，AI 将以此撰写正文。</p>
             </div>
-            <textarea value={styleDraft} onChange={(e) => setStyleDraft(e.target.value)} placeholder="如：第一人称、温情真实、适合家人阅读" rows={3} className="input text-base resize-y" />
+            <textarea value={styleDraft} onChange={(e) => setStyleDraft(e.target.value)} placeholder="如：第一人称、温情真实、适合家人阅读" rows={3} className="w-full rounded-xl border border-[#e2e0f0] bg-[#f8f7ff] px-5 py-4 text-base leading-relaxed outline-none transition focus:border-[#6366f1] focus:bg-white focus:ring-2 focus:ring-[#6366f1]/10 resize-y" />
           </div>
           <div className="card p-6">
             <div className="mb-3 text-center">
@@ -97,7 +97,7 @@ export default function ProjectDashboard() {
               <h2 className="mt-2 text-lg font-semibold text-[#1e1b4b]">作者背景</h2>
               <p className="mt-1 text-sm text-[#6b6889]">详细描述您的经历，AI 将据此规划章节结构。</p>
             </div>
-            <textarea value={background} onChange={(e) => setBackground(e.target.value)} placeholder="例如：我今年 65 岁，退休教师，从小在东北长大，经历过文革和改革开放..." rows={8} className="min-h-[180px] input text-base resize-y" />
+            <textarea value={background} onChange={(e) => setBackground(e.target.value)} placeholder="例如：我今年 65 岁，退休教师，从小在东北长大，经历过文革和改革开放..." rows={8} className="min-h-[180px] w-full rounded-xl border border-[#e2e0f0] bg-[#f8f7ff] px-5 py-4 text-base leading-relaxed outline-none transition focus:border-[#6366f1] focus:bg-white focus:ring-2 focus:ring-[#6366f1]/10 resize-y" />
             <button onClick={handlePlan} disabled={planning} className="btn-primary mt-3 w-full py-3.5">
               {planning ? <span className="inline-flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />生成大纲中...</span> : "✦ 保存并生成章节大纲"}
             </button>

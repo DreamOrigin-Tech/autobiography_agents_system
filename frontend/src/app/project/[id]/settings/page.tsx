@@ -93,7 +93,7 @@ export default function ProjectSettingsPage() {
 
       <form onSubmit={handleSave} className="card space-y-4 p-5">
         <div><label className="block text-sm font-medium text-[#1e1b4b]">自传标题</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className="input mt-1.5" /></div>
-        <div><label className="block text-sm font-medium text-[#1e1b4b]">写作风格</label><textarea value={styleNotes} onChange={(e) => setStyleNotes(e.target.value)} rows={6} placeholder="如：第一人称、温情真实、适合家人阅读" className="input mt-1.5 min-h-[140px] resize-y text-base" /></div>
+        <div><label className="block text-sm font-medium text-[#1e1b4b]">写作风格</label><textarea value={styleNotes} onChange={(e) => setStyleNotes(e.target.value)} rows={6} placeholder="如：第一人称、温情真实、适合家人阅读" className="mt-1.5 min-h-[140px] w-full rounded-xl border border-[#e2e0f0] bg-[#f8f7ff] px-5 py-4 text-base leading-relaxed outline-none transition focus:border-[#6366f1] focus:bg-white focus:ring-2 focus:ring-[#6366f1]/10 resize-y" /></div>
         <button type="submit" disabled={saving} className="w-full rounded-xl bg-[#1e1b4b] py-3.5 font-medium text-white transition hover:bg-black disabled:opacity-50">{saving ? "保存中..." : "保存设置"}</button>
       </form>
 
