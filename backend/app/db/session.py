@@ -37,15 +37,28 @@ async def init_db() -> None:
 def _migrate_schema(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
-    cols = {
+
+    # ── projects table ──
+    proj_cols = {
         row[1]
         for row in connection.exec_driver_sql("PRAGMA table_info(projects)").fetchall()
     }
-    if "is_published" not in cols:
+    _add_column_if_missing(connection, "projects", "is_published", "BOOLEAN NOT NULL DEFAULT 0", proj_cols)
+    _add_column_if_missing(connection, "projects", "share_token", "VARCHAR(64)", proj_cols)
+    _add_column_if_missing(connection, "projects", "published_at", "DATETIME", proj_cols)
+    _add_column_if_missing(connection, "projects", "timeline_json", "TEXT", proj_cols)
+
+    # ── chapters table ──
+    ch_cols = {
+        row[1]
+        for row in connection.exec_driver_sql("PRAGMA table_info(chapters)").fetchall()
+    }
+    _add_column_if_missing(connection, "chapters", "reflection_notes", "TEXT", ch_cols)
+    _add_column_if_missing(connection, "chapters", "topic_coverage", "TEXT", ch_cols)
+
+
+def _add_column_if_missing(connection, table: str, column: str, col_type: str, existing: set) -> None:
+    if column not in existing:
         connection.exec_driver_sql(
-            "ALTER TABLE projects ADD COLUMN is_published BOOLEAN NOT NULL DEFAULT 0"
+            f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"
         )
-    if "share_token" not in cols:
-        connection.exec_driver_sql("ALTER TABLE projects ADD COLUMN share_token VARCHAR(64)")
-    if "published_at" not in cols:
-        connection.exec_driver_sql("ALTER TABLE projects ADD COLUMN published_at DATETIME")
