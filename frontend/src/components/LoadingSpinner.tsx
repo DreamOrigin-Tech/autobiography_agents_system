@@ -1,8 +1,46 @@
 export function LoadingSpinner({ label = "加载中..." }: { label?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 text-stone-500">
-      <div className="h-8 w-8 animate-spin rounded-full border-2 border-amber-600 border-t-transparent" />
-      <p className="text-sm">{label}</p>
+    <div className="flex flex-col items-center justify-center gap-4 py-16">
+      <div className="flex gap-1.5">
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#c4946c]" style={{ animationDelay: "0ms" }} />
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#b0805a]" style={{ animationDelay: "150ms" }} />
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#8b5e3c]" style={{ animationDelay: "300ms" }} />
+      </div>
+      <p className="text-sm text-[#b8a892]">{label}</p>
+    </div>
+  );
+}
+
+/** Skeleton placeholder for card lists */
+export function CardSkeleton({ count = 3 }: { count?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="animate-fade-up rounded-2xl bg-white p-5 shadow-sm" style={{ animationDelay: `${i * 80}ms` }}>
+          <div className="flex items-start gap-4">
+            <div className="skeleton h-11 w-11 rounded-xl" />
+            <div className="flex-1 space-y-2.5">
+              <div className="skeleton h-3 w-20" />
+              <div className="skeleton h-5 w-3/4" />
+              <div className="skeleton h-3 w-full" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Skeleton for chat messages */
+export function ChatSkeleton() {
+  return (
+    <div className="space-y-6 px-4 py-4">
+      {[85, 70, 90, 60].map((w, i) => (
+        <div key={i} className={`flex items-end gap-2.5 ${i % 2 === 0 ? "" : "justify-end flex-row-reverse"}`}>
+          <div className="skeleton h-9 w-9 rounded-full" />
+          <div className="skeleton rounded-2xl px-4 py-4" style={{ width: `${w}%`, height: i % 2 === 0 ? 72 : 52 }} />
+        </div>
+      ))}
     </div>
   );
 }

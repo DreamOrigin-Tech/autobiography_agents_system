@@ -1,15 +1,33 @@
 @import "tailwindcss";
 
 :root {
-  --background: #faf9f7;
-  --foreground: #1c1917;
-  --accent: #b45309;
+  --background: #fbf7f2;
+  --foreground: #2c2416;
+  --accent: #8b5e3c;
+  --accent-light: #c4946c;
+  --ink: #1e1b18;
+  --muted: #7a7265;
+  --border: #e7dfd4;
+  --card: #ffffff;
+  --surface: #f5f0e9;
+  --success: #52796f;
+  --danger: #c25b56;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-light: var(--accent-light);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-surface: var(--surface);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
   --font-sans: var(--font-geist-sans);
+  --font-serif: var(--font-noto-serif);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -17,54 +35,82 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ---- Chapter Reading Typography ---- */
+.prose-chapter {
+  font-family: var(--font-noto-serif), "Noto Serif SC", "Songti SC", "SimSun", serif;
+  font-size: 1.0625rem;
+  line-height: 1.9;
+  color: var(--ink);
+  letter-spacing: 0.01em;
 }
 
 .prose-chapter p {
-  margin-bottom: 1rem;
-  line-height: 1.8;
-  font-size: 1.05rem;
+  margin-bottom: 1.25rem;
+  text-indent: 2em;
 }
 
+.prose-chapter p:first-child {
+  text-indent: 0;
+}
+
+/* ---- Skeleton Loading ---- */
+@keyframes skeleton-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #e7dfd4 25%, #f0eae2 50%, #e7dfd4 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/* ---- Fade animations ---- */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.35s ease-out both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+/* ---- Splash animations ---- */
 @keyframes splash-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes splash-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 0.45;
-  }
-  50% {
-    transform: scale(1.08);
-    opacity: 0.75;
-  }
+  0%, 100% { transform: scale(1); opacity: 0.35; }
+  50%      { transform: scale(1.06); opacity: 0.6; }
 }
 
 @keyframes splash-progress {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(60%);
-  }
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(60%); }
 }
 
-.splash-rise {
-  animation: splash-rise 0.7s ease-out both;
-}
+.splash-rise    { animation: splash-rise 0.7s ease-out both; }
+.splash-pulse   { animation: splash-pulse 2.4s ease-in-out infinite; }
+.splash-progress { animation: splash-progress 1.4s ease-in-out infinite; }
 
-.splash-pulse {
-  animation: splash-pulse 2.4s ease-in-out infinite;
-}
-
-.splash-progress {
-  animation: splash-progress 1.4s ease-in-out infinite;
-}
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d4c8b8; border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #b8a892; }

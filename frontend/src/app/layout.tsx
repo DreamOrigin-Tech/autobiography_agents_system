@@ -1,11 +1,18 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { Geist, Noto_Serif_SC } from "next/font/google";
 import { StartupGate } from "@/components/StartupGate";
 import "./globals.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
+});
+
+const notoSerif = Noto_Serif_SC({
+  variable: "--font-noto-serif",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -27,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className={`${geistSans.variable} h-full`}>
+    <html lang="zh-CN" className={`${geistSans.variable} ${notoSerif.variable} h-full`}>
       <body className="min-h-full antialiased">
         <StartupGate>{children}</StartupGate>
       </body>
