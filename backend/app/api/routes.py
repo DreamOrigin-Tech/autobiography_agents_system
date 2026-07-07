@@ -402,3 +402,96 @@ async def get_public_project(share_token: str, db: AsyncSession = Depends(get_db
     if not data["chapters"]:
         raise HTTPException(status_code=404, detail="暂无已发布内容")
     return data
+
+
+# ── Agent: Timeline ─────────────────────────────────
+
+@router.get("/projects/{project_id}/timeline")
+async def get_project_timeline(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_auth),
+):
+    project = await project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        events = json.loads(project.timeline_json) if project.timeline_json else []
+    except json.JSONDecodeError:
+        events = []
+    return {"project_id": project_id, "events": events}
+
+
+# ── Agent: Reflection Notes ─────────────────────────
+
+@router.get("/chapters/{chapter_id}/reflection")
+async def get_chapter_reflection(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_auth),
+):
+    chapter = await chapter_service.get_chapter(db, chapter_id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    notes = {}
+    if chapter.reflection_notes:
+        try:
+            notes = json.loads(chapter.reflection_notes)
+        except json.JSONDecodeError:
+            pass
+    coverage = {}
+    if chapter.topic_coverage:
+        try:
+            coverage = json.loads(chapter.topic_coverage)
+        except json.JSONDecodeError:
+            pass
+    return {
+        "chapter_id": chapter_id,
+        "reflection_notes": notes,
+        "topic_coverage": coverage,
+    }
+
+
+# ── Agent: Full Cross-Chapter Review ────────────────
+
+@router.get("/projects/{project_id}/review")
+async def review_project(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_auth),
+):
+    from app.agents.orchestra import orchestra
+
+    project = await project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    chapters_data = [
+        {"order": c.order, "title": c.title, "content_md": c.content_md or ""}
+        for c in project.chapters
+    ]
+    review = await orchestra.full_review(chapters_data)
+
+    # Build a chapter-by-chapter summary
+    chapter_summaries = []
+    for c in project.chapters:
+        ref = {}
+        if c.reflection_notes:
+            try:
+                ref = json.loads(c.reflection_notes)
+            except json.JSONDecodeError:
+                pass
+        chapter_summaries.append({
+            "order": c.order,
+            "title": c.title,
+            "status": c.status,
+            "quality_score": ref.get("quality_score"),
+            "strengths": ref.get("strengths", []),
+            "weaknesses": ref.get("weaknesses", []),
+        })
+
+    return {
+        "project_id": project_id,
+        "review": review,
+        "chapters": chapter_summaries,
+    }

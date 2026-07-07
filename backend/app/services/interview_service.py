@@ -74,8 +74,23 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
     topics = parse_topics(chapter.interview_topics)
     summaries = await get_chapter_summaries(db, project.id, chapter.order)
 
-    result = await generate_question(chapter.title, topics, msg_dicts, summaries)
+    # ── Agent: Memory-guided interview ──
+    from app.agents.orchestra import orchestra
+
+    guidance = await orchestra.guide_interview(chapter.title, topics, msg_dicts)
+    unanswered = guidance.get("unanswered_topics", [])
+
+    # Prioritize unanswered topics in the prompt context
+    topics_with_hint = list(topics)
+    if unanswered:
+        topics_with_hint = unanswered + [t for t in topics if t not in unanswered]
+
+    result = await generate_question(chapter.title, topics_with_hint, msg_dicts, summaries)
     question = result.get("question", "请分享一个让您印象最深刻的故事。")
+
+    # Override suggested_action with orchestra's assessment
+    if guidance.get("suggested_action") == "write_chapter":
+        result["suggested_action"] = "write_chapter"
 
     await add_message(db, session, "agent", question)
     return {
@@ -84,6 +99,7 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
         "suggested_action": result.get("suggested_action", "continue"),
         "reason": result.get("reason", ""),
         "session_id": session.id,
+        "unanswered_topics": unanswered,
     }
 
 

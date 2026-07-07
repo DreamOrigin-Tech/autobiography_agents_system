@@ -1,12 +1,17 @@
+import json
+import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.editor import generate_edit
+from app.agents.interviewer import parse_topics
 from app.agents.writer import stream_write_chapter, summarize_chapter, write_chapter
 from app.models import Chapter, ChapterStatus, Project, ProjectStatus, Revision
 from app.services.patch import patches_to_json
+
+logger = logging.getLogger(__name__)
 
 
 async def get_chapter(db: AsyncSession, chapter_id: str) -> Chapter | None:
@@ -63,6 +68,17 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
 
     messages = await get_interview_messages(db, chapter)
     prev_summary, next_summary = await get_adjacent_summaries(db, chapter)
+    topics = parse_topics_from_chapter(chapter)
+
+    # ── Agent: Pre-write reflection ──
+    from app.agents.orchestra import orchestra
+
+    pre_check = await orchestra.prepare_for_writing(chapter.title, topics, messages)
+    if not pre_check.get("ready"):
+        logger.warning(
+            "Pre-write check: chapter=%s ready=%s confidence=%.2f — proceeding anyway",
+            chapter.title, pre_check.get("ready"), pre_check.get("confidence", 0),
+        )
 
     chapter.status = ChapterStatus.DRAFTING
     project.status = ProjectStatus.WRITING
@@ -73,10 +89,30 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
     )
     summary = await summarize_chapter(content)
 
+    # ── Agent: Post-write reflection (uses new content for current chapter) ──
+    all_chapters = [
+        {
+            "order": c.order,
+            "title": c.title,
+            "content_md": content if c.id == chapter.id else c.content_md,
+        }
+        for c in project.chapters
+    ]
+    post_check = await orchestra.review_after_writing(
+        chapter.title, content, messages, chapter.order, all_chapters
+    )
+
     chapter.content_md = content
     chapter.summary = summary
+    chapter.reflection_notes = post_check.get("reflection_notes")
+    chapter.topic_coverage = json.dumps(pre_check.get("topic_coverage", {}), ensure_ascii=False)
     chapter.status = ChapterStatus.DONE
     project.status = ProjectStatus.REVIEWING
+
+    # ── Agent: Update project timeline ──
+    if post_check.get("timeline_events"):
+        _merge_timeline(project, post_check["timeline_events"])
+
     await db.commit()
     await db.refresh(chapter)
     return chapter
@@ -103,10 +139,32 @@ async def stream_write_chapter_content(
         yield token
 
     summary = await summarize_chapter(full_content)
+
+    # ── Agent: Post-write reflection (streaming, uses new content for current chapter) ──
+    from app.agents.orchestra import orchestra
+
+    topics = parse_topics_from_chapter(chapter)
+    all_chapters = [
+        {
+            "order": c.order,
+            "title": c.title,
+            "content_md": full_content if c.id == chapter.id else c.content_md,
+        }
+        for c in project.chapters
+    ]
+    post_check = await orchestra.review_after_writing(
+        chapter.title, full_content, messages, chapter.order, all_chapters
+    )
+
     chapter.content_md = full_content
     chapter.summary = summary
+    chapter.reflection_notes = post_check.get("reflection_notes")
     chapter.status = ChapterStatus.DONE
     project.status = ProjectStatus.REVIEWING
+
+    if post_check.get("timeline_events"):
+        _merge_timeline(project, post_check["timeline_events"])
+
     await db.commit()
 
 
@@ -178,3 +236,33 @@ async def manual_update_chapter(db: AsyncSession, chapter: Chapter, content_md: 
     await db.commit()
     await db.refresh(chapter)
     return chapter
+
+
+# ── Internal helpers ───────────────────────────────
+
+def parse_topics_from_chapter(chapter: Chapter) -> list[str]:
+    """Parse interview topics from a Chapter model."""
+    return parse_topics(chapter.interview_topics)
+
+
+def _merge_timeline(project: Project, new_events: list[dict]) -> None:
+    """Merge new timeline events into the project's timeline JSON."""
+    import json as _json
+
+    existing: list[dict] = []
+    if project.timeline_json:
+        try:
+            existing = _json.loads(project.timeline_json)
+        except _json.JSONDecodeError:
+            existing = []
+
+    # Simple dedup by event text similarity
+    existing_texts = {e.get("event", "") for e in existing}
+    for event in new_events:
+        if event.get("event", "") not in existing_texts:
+            existing.append(event)
+            existing_texts.add(event.get("event", ""))
+
+    # Sort by chapter order
+    existing.sort(key=lambda e: e.get("chapter", 0))
+    project.timeline_json = _json.dumps(existing, ensure_ascii=False)

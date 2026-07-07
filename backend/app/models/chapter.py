@@ -26,6 +26,8 @@ class Chapter(Base):
     content_md: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     interview_topics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reflection_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    topic_coverage: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
