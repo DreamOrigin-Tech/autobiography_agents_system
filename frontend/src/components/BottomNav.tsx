@@ -47,10 +47,10 @@ export function BottomNav({ projectId, activeChapterId }: BottomNavProps) {
     : `/project/${projectId}`;
 
   const tabs = [
-    { href: interviewHref, label: "采访", icon: icons.interview, match: "/interview/" },
     { href: `/project/${projectId}`, label: "章节", icon: icons.chapters, match: `/project/${projectId}` },
-    { href: `/project/${projectId}/settings`, label: "设置", icon: icons.settings, match: "/settings" },
+    { href: interviewHref, label: "采访", icon: icons.interview, match: "/interview/" },
     { href: chapterHref, label: "阅读", icon: icons.reading, match: "/chapter/" },
+    { href: `/project/${projectId}/settings`, label: "设置", icon: icons.settings, match: "/settings" },
   ];
 
   return (
