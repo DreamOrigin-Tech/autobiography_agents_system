@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Noto_Serif_SC } from "next/font/google";
 import { StartupGate } from "@/components/StartupGate";
+import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,7 +37,9 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" className={`${geistSans.variable} ${notoSerif.variable} h-full`}>
       <body className="min-h-full antialiased">
-        <StartupGate>{children}</StartupGate>
+        <ToastProvider>
+          <StartupGate>{children}</StartupGate>
+        </ToastProvider>
       </body>
     </html>
   );
