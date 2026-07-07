@@ -52,6 +52,7 @@ export default function HomePage() {
     setError("");
     try {
       const result = await api.login(password.trim());
+      console.info("[App] Login success");
       setToken(result.token);
       setNeedsAuth(false);
       setLoading(true);
@@ -70,6 +71,7 @@ export default function HomePage() {
     setError("");
     try {
       const project = await api.createProject(title.trim());
+      console.info("[App] Created project:", project.id, project.title);
       window.location.href = `/project/${project.id}`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");

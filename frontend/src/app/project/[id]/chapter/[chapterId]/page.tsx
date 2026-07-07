@@ -112,6 +112,7 @@ function ChapterEditorContent() {
   }
 
   async function handleWrite() {
+    console.info("[App] Start AI writing — chapter:", chapterId);
     setStreaming(true); setStreamContent("");
     streamWriteChapter(chapterId,
       (token) => setStreamContent((prev) => prev + token),

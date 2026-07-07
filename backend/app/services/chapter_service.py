@@ -73,12 +73,15 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
     # ── Agent: Pre-write reflection ──
     from app.agents.orchestra import orchestra
 
+    logger.info("Write chapter start: %s — messages=%d topics=%d", chapter.title, len(messages), len(topics))
     pre_check = await orchestra.prepare_for_writing(chapter.title, topics, messages)
     if not pre_check.get("ready"):
         logger.warning(
             "Pre-write check: chapter=%s ready=%s confidence=%.2f — proceeding anyway",
             chapter.title, pre_check.get("ready"), pre_check.get("confidence", 0),
         )
+    else:
+        logger.info("Pre-write check: chapter=%s ready=True confidence=%.2f", chapter.title, pre_check.get("confidence", 0))
 
     chapter.status = ChapterStatus.DRAFTING
     project.status = ProjectStatus.WRITING
@@ -115,6 +118,17 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
 
     await db.commit()
     await db.refresh(chapter)
+
+    try:
+        quality = json.loads(post_check.get("reflection_notes") or "{}").get("quality_score", "?")
+    except (json.JSONDecodeError, TypeError):
+        quality = "?"
+    logger.info(
+        "Write chapter done: %s — content_len=%d quality=%s consistency_issues=%d timeline_events=%d",
+        chapter.title, len(content), quality,
+        len(post_check.get("consistency_issues", [])),
+        len(post_check.get("timeline_events", [])),
+    )
     return chapter
 
 

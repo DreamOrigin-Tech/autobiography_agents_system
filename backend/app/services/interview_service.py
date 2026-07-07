@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +14,8 @@ from app.models import (
     ProjectStatus,
 )
 from app.services.chapter_service import get_chapter
+
+logger = logging.getLogger(__name__)
 
 
 async def get_or_create_session(db: AsyncSession, project: Project, chapter: Chapter) -> InterviewSession:
@@ -93,6 +97,10 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
         result["suggested_action"] = "write_chapter"
 
     await add_message(db, session, "agent", question)
+    logger.info(
+        "Interview question chapter=%s rounds=%d unanswered=%d suggested=%s",
+        chapter.title, len(msg_dicts) // 2, len(unanswered), result.get("suggested_action"),
+    )
     return {
         "question": question,
         "intent": result.get("intent", ""),

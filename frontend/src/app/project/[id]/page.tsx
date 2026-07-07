@@ -36,6 +36,7 @@ export default function ProjectDashboard() {
     setError("");
     try {
       const data = await api.planProject(projectId, background);
+      console.info("[App] Plan outline — chapters:", data.chapters.length);
       setProject(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "规划失败");

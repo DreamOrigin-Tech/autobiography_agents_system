@@ -1,5 +1,6 @@
 """Simple Bearer-token authentication for single-user deployment."""
 
+import logging
 import secrets
 from typing import Optional
 
@@ -7,6 +8,8 @@ from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # Optional: if ACCESS_PASSWORD is not set, auth is disabled
 AUTH_ENABLED = bool(settings.access_password)
@@ -50,4 +53,5 @@ async def verify_auth(
     if token and _check_password(token):
         return True
 
+    logger.warning("Auth denied for %s %s (IP: %s)", request.method, request.url.path, request.client.host if request.client else "unknown")
     raise HTTPException(status_code=401, detail="请先登录")

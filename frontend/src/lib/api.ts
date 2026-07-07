@@ -12,6 +12,16 @@ import type {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:6986/api";
 const TOKEN_KEY = "auth_token";
 
+// ── Debug logging ───────────────────────────────────
+const DEBUG = typeof window !== "undefined"
+  && (window.location.hostname === "localhost" || new URLSearchParams(window.location.search).has("debug"));
+
+function apiLog(method: string, path: string, detail: string) {
+  if (DEBUG) {
+    console.debug(`[API] ${method} ${path} — ${detail}`);
+  }
+}
+
 // ── Auth helpers ────────────────────────────────────
 
 export function getToken(): string | null {
@@ -43,6 +53,7 @@ async function parseError(res: Response): Promise<string> {
 // ── Request helper ──────────────────────────────────
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const method = options?.method || "GET";
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -52,19 +63,28 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  apiLog(method, path, "→");
+  const start = performance.now();
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const elapsed = Math.round(performance.now() - start);
 
-  if (res.status === 204) return undefined as unknown as T; // no content
+  if (res.status === 204) {
+    apiLog(method, path, `204 (${elapsed}ms)`);
+    return undefined as unknown as T;
+  }
 
   if (res.status === 401) {
+    apiLog(method, path, `401 (${elapsed}ms)`);
     clearToken();
     throw new Error("请先登录");
   }
 
   if (!res.ok) {
     const detail = await parseError(res);
+    apiLog(method, path, `${res.status} (${elapsed}ms) — ${detail}`);
     throw new Error(detail);
   }
+  apiLog(method, path, `${res.status} (${elapsed}ms)`);
   return res.json();
 }
 
@@ -178,13 +198,16 @@ export function streamWriteChapter(
     url += `?token=${encodeURIComponent(token)}`;
   }
   const source = new EventSource(url);
+  let errorCount = 0;
+  const MAX_ERRORS = 5;
 
   source.addEventListener("token", (event) => {
+    errorCount = 0; // reset on successful data
     try {
       const data = JSON.parse((event as MessageEvent).data);
       onToken(data.text);
     } catch {
-      /* ignore */
+      /* ignore malformed token */
     }
   });
 
@@ -197,9 +220,32 @@ export function streamWriteChapter(
     }
   });
 
-  source.addEventListener("error", () => {
-    onError("写作流连接失败");
-    source.close();
+  source.addEventListener("error", (event) => {
+    errorCount++;
+
+    // Check if the server sent an explicit error event
+    if (event instanceof MessageEvent) {
+      try {
+        const data = JSON.parse(event.data);
+        onError(data.message || "写作服务出错");
+      } catch {
+        onError("写作服务连接中断");
+      }
+      source.close();
+      return;
+    }
+
+    // readyState 2 = CLOSED — connection was permanently closed
+    if (source.readyState === EventSource.CLOSED) {
+      if (errorCount >= MAX_ERRORS) {
+        onError("写作流多次重连失败，请检查网络或重试");
+        source.close();
+      }
+      // If under MAX_ERRORS, let EventSource auto-reconnect (built-in behavior)
+      return;
+    }
+
+    // readyState 0 = CONNECTING — browser is retrying, let it continue
   });
 
   return () => source.close();

@@ -90,6 +90,7 @@ export default function ProjectSettingsPage() {
   async function handleDelete() {
     setDeleting(true); setError("");
     try {
+      console.warn("[App] Delete project:", projectId, project?.title);
       await api.deleteProject(projectId);
       router.push("/");
     } catch (e) {

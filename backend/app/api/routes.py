@@ -48,7 +48,9 @@ async def login(body: LoginRequest):
         raise HTTPException(status_code=400, detail="未配置 ACCESS_PASSWORD，请联系管理员")
 
     if not secrets.compare_digest(body.password, settings.access_password):
+        logger.warning("Login failed: incorrect password")
         raise HTTPException(status_code=401, detail="密码错误")
+    logger.info("Login successful")
     return {"token": settings.access_password, "message": "登录成功"}
 
 
@@ -96,10 +98,12 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.warning("Delete project id=%s", project_id)
     project = await project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     await project_service.delete_project(db, project)
+    logger.warning("Delete project id=%s title=%s — done", project_id, project.title)
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectDetail)
@@ -124,11 +128,13 @@ async def plan_project(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Plan project %s — author_background length=%d", project_id, len(body.author_background))
     rate_limit_llm(request)
     project = await project_service.get_project(db, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     await project_service.plan_project_outline(db, project, body.author_background)
+    logger.info("Plan project %s — done, chapters=%d", project_id, len(project.chapters))
     return await project_service.get_project(db, project_id)
 
 
@@ -174,11 +180,13 @@ async def start_interview(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Start interview chapter=%s", chapter_id)
     rate_limit_llm(request)
     chapter = await chapter_service.get_chapter(db, chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await interview_service.generate_interview_question(db, chapter)
+    logger.info("Start interview chapter=%s — suggested_action=%s", chapter_id, result.get("suggested_action"))
     return result
 
 
@@ -211,11 +219,13 @@ async def submit_interview_answer(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Interview answer chapter=%s answer_len=%d", chapter_id, len(body.content))
     rate_limit_llm(request)
     chapter = await chapter_service.get_chapter(db, chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await interview_service.submit_answer(db, chapter, body.content)
+    logger.info("Interview answer chapter=%s — next suggested_action=%s", chapter_id, result.get("suggested_action"))
     return result
 
 
@@ -249,11 +259,13 @@ async def write_chapter(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Write chapter (non-stream) chapter=%s", chapter_id)
     rate_limit_llm(request)
     chapter = await chapter_service.get_chapter(db, chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     updated = await chapter_service.write_chapter_content(db, chapter)
+    logger.info("Write chapter chapter=%s — done, content_len=%d", chapter_id, len(updated.content_md or ""))
     return updated
 
 
@@ -264,15 +276,20 @@ async def stream_write_chapter(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Write chapter (SSE stream) chapter=%s", chapter_id)
     rate_limit_llm(request)
     chapter = await chapter_service.get_chapter(db, chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
 
     async def event_generator() -> AsyncGenerator[dict, None]:
+        token_count = 0
+
         try:
             async for token in chapter_service.stream_write_chapter_content(db, chapter):
+                token_count += 1
                 yield {"event": "token", "data": json.dumps({"text": token}, ensure_ascii=False)}
+            logger.info("SSE write done chapter=%s tokens=%d", chapter_id, token_count)
             refreshed = await chapter_service.get_chapter(db, chapter_id)
             yield {
                 "event": "done",
@@ -282,9 +299,10 @@ async def stream_write_chapter(
                 ),
             }
         except Exception as exc:
+            logger.exception("SSE write stream failed for chapter=%s", chapter_id)
             yield {"event": "error", "data": json.dumps({"message": str(exc)})}
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), ping=8)
 
 
 @router.post("/chapters/{chapter_id}/edit", response_model=EditPreviewResponse)
@@ -295,11 +313,13 @@ async def preview_edit(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_auth),
 ):
+    logger.info("Preview edit chapter=%s instruction_len=%d", chapter_id, len(body.instruction))
     rate_limit_llm(request)
     chapter = await chapter_service.get_chapter(db, chapter_id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     revision = await chapter_service.preview_edit(db, chapter, body.instruction)
+    logger.info("Preview edit chapter=%s — revision_id=%s", chapter_id, revision.id)
     diff_text = getattr(revision, "_diff_text", None) or unified_diff(
         revision.content_before or "", revision.content_after or ""
     )
