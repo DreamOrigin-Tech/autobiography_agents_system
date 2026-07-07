@@ -63,7 +63,9 @@ async def get_interview_messages(db: AsyncSession, chapter: Chapter) -> list[dic
 
 
 async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
-    project_result = await db.execute(select(Project).where(Project.id == chapter.project_id))
+    project_result = await db.execute(
+        select(Project).where(Project.id == chapter.project_id)
+    )
     project = project_result.scalar_one()
 
     messages = await get_interview_messages(db, chapter)
@@ -92,14 +94,19 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
     )
     summary = await summarize_chapter(content)
 
-    # ── Agent: Post-write reflection (uses new content for current chapter) ──
+    # ── Agent: Post-write reflection ──
+    chapters_result = await db.execute(
+        select(Chapter).where(Chapter.project_id == project.id).order_by(Chapter.order)
+    )
+    db_chapters = list(chapters_result.scalars().all())
+
     all_chapters = [
         {
             "order": c.order,
             "title": c.title,
-            "content_md": content if c.id == chapter.id else c.content_md,
+            "content_md": content if c.id == chapter.id else (c.content_md or ""),
         }
-        for c in project.chapters
+        for c in db_chapters
     ]
     post_check = await orchestra.review_after_writing(
         chapter.title, content, messages, chapter.order, all_chapters
@@ -135,7 +142,9 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
 async def stream_write_chapter_content(
     db: AsyncSession, chapter: Chapter
 ) -> AsyncGenerator[str, None]:
-    project_result = await db.execute(select(Project).where(Project.id == chapter.project_id))
+    project_result = await db.execute(
+        select(Project).where(Project.id == chapter.project_id)
+    )
     project = project_result.scalar_one()
 
     messages = await get_interview_messages(db, chapter)
@@ -154,17 +163,22 @@ async def stream_write_chapter_content(
 
     summary = await summarize_chapter(full_content)
 
-    # ── Agent: Post-write reflection (streaming, uses new content for current chapter) ──
+    # ── Agent: Post-write reflection ──
+    # Query chapters explicitly as dicts to avoid lazy-load in generator context
     from app.agents.orchestra import orchestra
 
-    topics = parse_topics_from_chapter(chapter)
+    chapters_result = await db.execute(
+        select(Chapter).where(Chapter.project_id == project.id).order_by(Chapter.order)
+    )
+    db_chapters = list(chapters_result.scalars().all())
+
     all_chapters = [
         {
             "order": c.order,
             "title": c.title,
-            "content_md": full_content if c.id == chapter.id else c.content_md,
+            "content_md": full_content if c.id == chapter.id else (c.content_md or ""),
         }
-        for c in project.chapters
+        for c in db_chapters
     ]
     post_check = await orchestra.review_after_writing(
         chapter.title, full_content, messages, chapter.order, all_chapters
