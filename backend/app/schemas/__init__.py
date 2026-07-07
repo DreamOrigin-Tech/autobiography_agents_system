@@ -19,6 +19,10 @@ class ChapterStatusSchema(StrEnum):
     DONE = "done"
 
 
+class LoginRequest(BaseModel):
+    password: str = Field(min_length=1)
+
+
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     style_notes: str | None = None

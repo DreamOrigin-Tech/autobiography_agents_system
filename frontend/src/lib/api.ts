@@ -10,23 +10,75 @@ import type {
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:6986/api";
+const TOKEN_KEY = "auth_token";
+
+// ── Auth helpers ────────────────────────────────────
+
+export function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setToken(token: string) {
+  localStorage.setItem(TOKEN_KEY, token);
+}
+
+export function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export function isAuthenticated(): boolean {
+  return getToken() !== null;
+}
+
+async function parseError(res: Response): Promise<string> {
+  try {
+    const body = JSON.parse(await res.text());
+    return body.detail || body.message || `请求失败 (${res.status})`;
+  } catch {
+    return `请求失败 (${res.status})`;
+  }
+}
+
+// ── Request helper ──────────────────────────────────
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options?.headers,
-    },
-  });
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> | undefined),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+
+  if (res.status === 204) return undefined as unknown as T; // no content
+
+  if (res.status === 401) {
+    clearToken();
+    throw new Error("请先登录");
+  }
+
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed: ${res.status}`);
+    const detail = await parseError(res);
+    throw new Error(detail);
   }
   return res.json();
 }
 
+// ── API ─────────────────────────────────────────────
+
 export const api = {
+  // Auth
+  login: (password: string) =>
+    request<{ token: string; message: string }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    }),
+
+  // Projects
   listProjects: () => request<ProjectDetail[]>("/projects"),
 
   createProject: (title: string, styleNotes?: string) =>
@@ -43,12 +95,16 @@ export const api = {
       body: JSON.stringify(data),
     }),
 
+  deleteProject: (id: string) =>
+    request<void>(`/projects/${id}`, { method: "DELETE" }),
+
   planProject: (id: string, authorBackground: string) =>
     request<ProjectDetail>(`/projects/${id}/plan`, {
       method: "POST",
       body: JSON.stringify({ author_background: authorBackground }),
     }),
 
+  // Chapters
   getChapter: (id: string) => request<ChapterDetail>(`/chapters/${id}`),
 
   updateChapter: (chapterId: string, contentMd: string) =>
@@ -57,6 +113,7 @@ export const api = {
       body: JSON.stringify({ content_md: contentMd }),
     }),
 
+  // Interview
   startInterview: (chapterId: string) =>
     request<InterviewResult>(`/chapters/${chapterId}/interview/start`, {
       method: "POST",
@@ -71,9 +128,11 @@ export const api = {
       body: JSON.stringify({ content }),
     }),
 
+  // Writing
   writeChapter: (chapterId: string) =>
     request<ChapterDetail>(`/chapters/${chapterId}/write`, { method: "POST" }),
 
+  // Editing
   previewEdit: (chapterId: string, instruction: string) =>
     request<EditPreview>(`/chapters/${chapterId}/edit`, {
       method: "POST",
@@ -94,6 +153,7 @@ export const api = {
       method: "POST",
     }),
 
+  // Publish
   publishProject: (projectId: string) =>
     request<PublishResponse>(`/projects/${projectId}/publish`, { method: "POST" }),
 
@@ -104,13 +164,19 @@ export const api = {
     request<PublishedProject>(`/public/share/${shareToken}`),
 };
 
+// ── SSE streaming ───────────────────────────────────
+
 export function streamWriteChapter(
   chapterId: string,
   onToken: (text: string) => void,
   onDone: (content: string) => void,
   onError: (message: string) => void,
 ): () => void {
-  const url = `${API_BASE}/chapters/${chapterId}/write/stream`;
+  let url = `${API_BASE}/chapters/${chapterId}/write/stream`;
+  const token = getToken();
+  if (token) {
+    url += `?token=${encodeURIComponent(token)}`;
+  }
   const source = new EventSource(url);
 
   source.addEventListener("token", (event) => {
@@ -138,6 +204,8 @@ export function streamWriteChapter(
 
   return () => source.close();
 }
+
+// ── Status labels ───────────────────────────────────
 
 export const statusLabels: Record<string, string> = {
   planning: "规划中",

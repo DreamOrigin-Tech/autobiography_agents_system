@@ -2,25 +2,66 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, statusLabels } from "@/lib/api";
+import { api, getToken, isAuthenticated, setToken, statusLabels } from "@/lib/api";
 import type { ProjectDetail } from "@/lib/types";
 import { CardSkeleton } from "@/components/LoadingSpinner";
 
 export default function HomePage() {
   const [projects, setProjects] = useState<ProjectDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [needsAuth, setNeedsAuth] = useState(false);
+  const [password, setPassword] = useState("");
+  const [loginBusy, setLoginBusy] = useState(false);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (isAuthenticated()) {
+      loadProjects();
+      setAuthChecked(true);
+    } else {
+      // Try a probe request to see if auth is required
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:6986/api"}/projects`)
+        .then((res) => {
+          if (res.status === 401) {
+            setNeedsAuth(true);
+          } else {
+            loadProjects();
+          }
+        })
+        .catch(() => loadProjects())
+        .finally(() => setAuthChecked(true));
+    }
+  }, []);
+
+  function loadProjects() {
     api
       .listProjects()
       .then(setProjects)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!password.trim()) return;
+    setLoginBusy(true);
+    setError("");
+    try {
+      const result = await api.login(password.trim());
+      setToken(result.token);
+      setNeedsAuth(false);
+      setLoading(true);
+      loadProjects();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "登录失败");
+    } finally {
+      setLoginBusy(false);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -52,8 +93,36 @@ export default function HomePage() {
         </p>
       </header>
 
-      {loading ? (
+      {!authChecked || (loading && !getToken()) ? (
         <CardSkeleton count={3} />
+      ) : needsAuth ? (
+        <form onSubmit={handleLogin} className="animate-fade-up space-y-4 rounded-2xl bg-white p-6 shadow-sm">
+          <div className="text-center">
+            <span className="text-4xl">🔐</span>
+            <h2 className="mt-2 text-lg font-semibold text-[#2c2416]">需要登录</h2>
+            <p className="mt-1 text-sm text-[#7a7265]">请输入访问密码</p>
+          </div>
+          {error && (
+            <div className="rounded-xl border border-[#f0d0d0] bg-[#fef5f5] px-4 py-3 text-sm text-[#c25b56]">
+              {error}
+            </div>
+          )}
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="访问密码"
+            className="w-full rounded-xl border border-[#e7dfd4] bg-[#fbf7f2] px-4 py-3 text-base outline-none transition focus:border-[#8b5e3c] focus:bg-white focus:ring-2 focus:ring-[#8b5e3c]/10"
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={loginBusy || !password.trim()}
+            className="w-full rounded-xl bg-[#8b5e3c] py-3.5 font-medium text-white transition hover:bg-[#6d4a30] disabled:opacity-50"
+          >
+            {loginBusy ? "验证中..." : "登录"}
+          </button>
+        </form>
       ) : (
         <>
           {error && (

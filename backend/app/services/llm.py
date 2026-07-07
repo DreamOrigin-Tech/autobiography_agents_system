@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any
@@ -7,6 +8,9 @@ from litellm import acompletion
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+LLM_MAX_RETRIES = 3
+LLM_RETRY_BASE_DELAY = 1.5  # seconds
 
 
 def _build_kwargs(
@@ -46,11 +50,27 @@ async def llm_complete(
 ) -> Any:
     kwargs = _build_kwargs(stream=stream, temperature=temperature, response_format=response_format)
     kwargs["messages"] = messages
-    try:
-        return await acompletion(**kwargs)
-    except Exception:
-        logger.exception("LLM call failed: model=%s", kwargs.get("model"))
-        raise
+
+    last_exc = None
+    for attempt in range(LLM_MAX_RETRIES):
+        try:
+            return await acompletion(**kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < LLM_MAX_RETRIES - 1:
+                delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "LLM attempt %d/%d failed (model=%s), retrying in %.1fs: %s",
+                    attempt + 1, LLM_MAX_RETRIES, kwargs.get("model"), delay, exc,
+                )
+                await asyncio.sleep(delay)
+            else:
+                logger.exception(
+                    "LLM call failed after %d attempts: model=%s",
+                    LLM_MAX_RETRIES, kwargs.get("model"),
+                )
+
+    raise last_exc  # type: ignore[misc]
 
 
 async def llm_complete_text(messages: list[dict[str, str]], **kwargs: Any) -> str:

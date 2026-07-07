@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { ProjectDetail } from "@/lib/types";
@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 
 export default function ProjectSettingsPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [title, setTitle] = useState("");
@@ -17,6 +18,8 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -82,6 +85,19 @@ export default function ProjectSettingsPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { setError("复制失败，请手动复制链接"); }
+  }
+
+  async function handleDelete() {
+    setDeleting(true); setError("");
+    try {
+      await api.deleteProject(projectId);
+      router.push("/");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
+      setShowDeleteConfirm(false);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   const activeChapter = project?.chapters[0];
@@ -162,6 +178,31 @@ export default function ProjectSettingsPage() {
           {saving ? "保存中..." : "保存设置"}
         </button>
       </form>
+
+      {/* Delete section */}
+      <section className="mt-6 rounded-2xl bg-white p-5 shadow-sm">
+        {showDeleteConfirm ? (
+          <div className="space-y-3 text-center">
+            <p className="text-sm text-[#c25b56] font-medium">确定要删除「{project?.title}」吗？</p>
+            <p className="text-xs text-[#b8a892]">此操作不可撤销，所有章节和采访记录将被永久删除。</p>
+            <div className="flex gap-2">
+              <button onClick={handleDelete} disabled={deleting}
+                className="flex-1 rounded-xl bg-[#c25b56] py-3 text-sm font-medium text-white transition hover:bg-[#a04440] disabled:opacity-50">
+                {deleting ? "删除中..." : "确认删除"}
+              </button>
+              <button onClick={() => setShowDeleteConfirm(false)} disabled={deleting}
+                className="flex-1 rounded-xl border border-[#e7dfd4] py-3 text-sm font-medium text-[#7a7265] transition hover:bg-[#f5f0e9]">
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={() => setShowDeleteConfirm(true)}
+            className="w-full rounded-xl border border-[#f0d0d0] py-3 text-sm font-medium text-[#c25b56] transition hover:bg-[#fef5f5]">
+            删除项目
+          </button>
+        )}
+      </section>
 
       <BottomNav projectId={projectId} activeChapterId={activeChapter?.id} />
     </main>

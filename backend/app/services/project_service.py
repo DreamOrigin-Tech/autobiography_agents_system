@@ -1,4 +1,5 @@
 import json
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,6 +7,8 @@ from sqlalchemy.orm import selectinload
 
 from app.agents.planner import plan_outline, plan_outline_fallback, topics_to_text
 from app.models import Chapter, ChapterStatus, Project, ProjectStatus, User
+
+logger = logging.getLogger(__name__)
 
 
 async def get_or_create_default_user(db: AsyncSession) -> User:
@@ -55,15 +58,31 @@ async def update_project(
     return project
 
 
+async def delete_project(db: AsyncSession, project: Project) -> None:
+    await db.delete(project)
+    await db.commit()
+
+
 async def plan_project_outline(
     db: AsyncSession, project: Project, author_background: str
 ) -> list[Chapter]:
+    used_fallback = False
     try:
         outline = await plan_outline(project.title, author_background, project.style_notes)
         if not outline.chapters:
+            logger.warning("LLM returned empty chapters for project=%s, using fallback", project.id)
             outline = await plan_outline_fallback(project.title)
+            used_fallback = True
     except Exception:
+        logger.exception("LLM plan failed for project=%s, using fallback", project.id)
         outline = await plan_outline_fallback(project.title)
+        used_fallback = True
+
+    if used_fallback:
+        logger.warning(
+            "Project %s using hardcoded chapter outline (LLM unavailable or returned empty)",
+            project.id,
+        )
 
     for existing in list(project.chapters):
         await db.delete(existing)

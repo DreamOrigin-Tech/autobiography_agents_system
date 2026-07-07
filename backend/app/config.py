@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./autobiography.db"
     cors_origins: str = "http://localhost:6985"
+    access_password: str = ""  # 为空则跳过认证（单用户部署）
 
     @property
     def cors_origin_list(self) -> list[str]:
