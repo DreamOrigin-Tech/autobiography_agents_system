@@ -70,9 +70,9 @@ export default function ProjectDashboard() {
   return (
     <main className="mx-auto min-h-screen max-w-lg px-5 pb-28 pt-6">
       <header className="mb-6">
-        <Link href="/" className="inline-flex items-center gap-1 text-sm text-[#8b5e3c] hover:underline">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-          返回
+        <Link href="/" className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-sm font-medium text-[#7a7265] shadow-sm transition-all hover:text-[#2c2416] hover:shadow active:scale-95">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+          首页
         </Link>
         <h1 className="mt-2 text-2xl font-bold text-[#2c2416]">{project.title}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -110,9 +110,9 @@ export default function ProjectDashboard() {
           <textarea
             value={background}
             onChange={(e) => setBackground(e.target.value)}
-            placeholder="例如：我今年 65 岁，退休教师，想为孙辈留下人生回忆..."
-            rows={5}
-            className="w-full rounded-xl border border-[#e7dfd4] bg-[#fbf7f2] px-4 py-3 text-sm outline-none transition focus:border-[#8b5e3c] focus:bg-white focus:ring-2 focus:ring-[#8b5e3c]/10 resize-none"
+            placeholder="例如：我今年 65 岁，退休教师，想为孙辈留下人生回忆...请尽可能详细地描述您的背景、经历和期望。"
+            rows={8}
+            className="min-h-[200px] w-full rounded-xl border border-[#e7dfd4] bg-[#fbf7f2] px-5 py-4 text-base leading-relaxed outline-none transition focus:border-[#8b5e3c] focus:bg-white focus:ring-2 focus:ring-[#8b5e3c]/10 resize-y"
           />
           <button
             onClick={handlePlan}

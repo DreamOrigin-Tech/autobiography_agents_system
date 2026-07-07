@@ -98,9 +98,9 @@ export default function ProjectSettingsPage() {
   return (
     <main className="mx-auto min-h-screen max-w-lg px-5 pb-28 pt-6">
       <header className="mb-6">
-        <Link href={`/project/${projectId}`} className="inline-flex items-center gap-1 text-sm text-[#8b5e3c] hover:underline">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
-          返回
+        <Link href={`/project/${projectId}`} className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-sm font-medium text-[#7a7265] shadow-sm transition-all hover:text-[#2c2416] hover:shadow active:scale-95">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+          项目
         </Link>
         <h1 className="mt-2 text-2xl font-bold text-[#2c2416]">项目设置</h1>
       </header>
@@ -153,9 +153,10 @@ export default function ProjectSettingsPage() {
         </div>
         <div>
           <label className="block text-sm font-medium text-[#2c2416]">写作风格</label>
-          <textarea value={styleNotes} onChange={(e) => setStyleNotes(e.target.value)} rows={4}
-            placeholder="如：第一人称、温情真实、适合家人阅读"
-            className="mt-1.5 w-full rounded-xl border border-[#e7dfd4] bg-[#fbf7f2] px-4 py-3 outline-none transition focus:border-[#8b5e3c] focus:bg-white focus:ring-2 focus:ring-[#8b5e3c]/10 resize-none" />
+          <textarea value={styleNotes} onChange={(e) => setStyleNotes(e.target.value)}
+            rows={6}
+            placeholder="如：第一人称、温情真实、适合家人阅读。请详细描述您期望的写作风格..."
+            className="mt-1.5 min-h-[140px] w-full resize-y rounded-xl border border-[#e7dfd4] bg-[#fbf7f2] px-5 py-4 text-base leading-relaxed outline-none transition focus:border-[#8b5e3c] focus:bg-white focus:ring-2 focus:ring-[#8b5e3c]/10" />
         </div>
         <button type="submit" disabled={saving} className="w-full rounded-xl bg-[#2c2416] py-3.5 font-medium text-white transition hover:bg-black disabled:opacity-50">
           {saving ? "保存中..." : "保存设置"}

@@ -142,8 +142,8 @@ function ChapterEditorContent() {
       )}
       <div className="mx-auto w-full max-w-lg md:max-w-none md:flex-1">
         <header className="sticky top-0 z-10 border-b border-[#e7dfd4] bg-white/90 px-5 py-3.5 backdrop-blur-xl">
-          <Link href={`/project/${projectId}`} className="inline-flex items-center gap-1 text-sm text-[#8b5e3c] hover:underline">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+          <Link href={`/project/${projectId}`} className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-sm font-medium text-[#7a7265] transition-all hover:bg-white hover:text-[#2c2416] hover:shadow-sm active:scale-95">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
             章节列表
           </Link>
           <div className="mt-1 flex items-center justify-between gap-3">
@@ -179,7 +179,7 @@ function ChapterEditorContent() {
                 value={manualDraft}
                 onChange={(e) => setManualDraft(e.target.value)}
                 placeholder="在此撰写或修改章节内容..."
-                className="min-h-[60vh] w-full resize-y rounded-2xl border border-[#e7dfd4] bg-white px-5 py-4 text-[15px] leading-relaxed text-[#2c2416] outline-none transition focus:border-[#8b5e3c] focus:ring-2 focus:ring-[#8b5e3c]/10 font-serif"
+                className="min-h-[70vh] w-full resize-y rounded-2xl border border-[#e7dfd4] bg-white px-6 py-5 text-base leading-relaxed text-[#2c2416] outline-none transition focus:border-[#8b5e3c] focus:ring-2 focus:ring-[#8b5e3c]/10 font-serif"
                 autoFocus
               />
               <p className="text-right text-xs text-[#b8a892]">{manualDraft.length} 字</p>
