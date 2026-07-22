@@ -4,7 +4,8 @@
 # 用法:
 #   ./start.sh              默认 Docker 部署并启动
 #   ./start.sh docker       Docker 部署并启动
-#   ./start.sh dev          本地开发模式启动
+#   ./start.sh dev          Docker 开发模式启动（免登录）
+#   ./start.sh local        本机开发模式启动（Python venv + npm）
 #   ./start.sh prod          公网生产部署（jiumozhi.tech:6985/6986）
 #   ./start.sh stop          停止所有服务
 #   ./start.sh status        查看运行状态
@@ -45,6 +46,39 @@ error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+setup_node_runtime() {
+  if command_exists node && command_exists npm; then
+    return 0
+  fi
+
+  local node_bin
+  for node_bin in /opt/homebrew/bin /usr/local/bin; do
+    if [[ -x "$node_bin/node" && -x "$node_bin/npm" ]]; then
+      export PATH="$node_bin:$PATH"
+      return 0
+    fi
+  done
+
+  local detected_nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  if [[ -s "$detected_nvm_dir/nvm.sh" ]]; then
+    export NVM_DIR="$detected_nvm_dir"
+    # shellcheck source=/dev/null
+    source "$NVM_DIR/nvm.sh"
+    nvm use --silent default >/dev/null 2>&1 \
+      || nvm use --silent node >/dev/null 2>&1 \
+      || true
+  fi
+}
+
+check_node_version() {
+  local node_major
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])')"
+  if (( node_major < 20 )); then
+    error "Node.js 版本过低: $(node --version)，需要 Node.js 20 或更高版本"
+    exit 1
+  fi
 }
 
 docker_compose() {
@@ -189,14 +223,16 @@ start_prod() {
 
 start_docker() {
   if ! command_exists docker; then
-    error "未安装 Docker，请安装 Docker Desktop 或使用: ./start.sh dev"
+    error "未安装 Docker，请安装 Docker Desktop 或使用: ./start.sh local"
     exit 1
   fi
 
   ensure_backend_env
   cd "$ROOT_DIR"
+  export DEV_AUTH_BYPASS=true
 
   info "构建并启动 Docker 容器（本地开发模式）..."
+  info "开发模式免登录已开启（Docker）"
   warn "公网服务器请使用: ./start.sh prod"
   docker_compose up --build -d
 
@@ -216,10 +252,21 @@ start_dev() {
     error "未找到 python3"
     exit 1
   fi
-  if ! command_exists npm; then
-    error "未找到 npm，请先安装 Node.js"
+
+  setup_node_runtime
+  if ! command_exists node || ! command_exists npm; then
+    if command_exists docker; then
+      warn "未找到本机 Node.js/npm，自动切换到 Docker 开发模式"
+      start_docker
+      return
+    fi
+    error "未找到 Node.js/npm，且 Docker 不可用"
+    info "macOS 可执行: brew install node"
+    info "也可以安装 Docker Desktop 后执行: ./start.sh dev"
     exit 1
   fi
+  check_node_version
+  info "Node.js: $(node --version)，npm: $(npm --version)"
 
   # 若 Docker 容器在跑，先提示
   if command_exists docker && docker_compose ps --status running 2>/dev/null | grep -q .; then
@@ -374,8 +421,9 @@ usage() {
   ./start.sh [命令]
 
 命令:
-  docker    Docker 构建并启动（本地端口，默认）
-  dev       本地开发模式（Python venv + npm dev）
+  docker    Docker 开发模式（本地端口，默认，免登录）
+  dev       Docker 开发模式（本地端口，免登录）
+  local     本机开发模式（Python venv + npm dev）
   prod      公网生产部署（jiumozhi.tech:6985/6986）
   stop      停止所有服务
   status    查看运行状态
@@ -385,7 +433,8 @@ usage() {
 
 示例:
   ./start.sh              # 本地 Docker
-  ./start.sh dev          # 本地开发
+  ./start.sh dev          # Docker 开发
+  ./start.sh local        # 本机开发
   ./start.sh prod         # 公网部署
   ./start.sh stop         # 停止
 
@@ -404,7 +453,10 @@ main() {
     docker|up|start|"")
       start_docker
       ;;
-    dev|local)
+    dev)
+      start_docker
+      ;;
+    local)
       start_dev
       ;;
     prod|production)

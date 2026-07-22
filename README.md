@@ -88,7 +88,15 @@ curl http://127.0.0.1:6986/health
 ./start.sh dev
 ```
 
-该命令会临时开启开发免登录，方便本地调试；`./start.sh prod` 会强制关闭免登录，生产环境仍要求用户登录。
+该命令会使用 Docker 启动开发环境并临时开启免登录，方便本地调试；`./start.sh prod` 会强制关闭免登录，生产环境仍要求用户登录。
+
+脚本会自动发现 Homebrew 或 nvm 安装的 Node.js。若本机没有 Node.js/npm 但已安装 Docker，开发启动会自动切换到 Docker 模式。
+
+如果希望使用本机 Python venv 和 npm，而不是 Docker，可执行：
+
+```bash
+./start.sh local
+```
 
 API 文档：
 
