@@ -25,6 +25,10 @@ BACKEND_PORT="${BACKEND_PORT:-6986}"
 # 公网域名（生产部署）
 DOMAIN="${DOMAIN:-jiumozhi.tech}"
 
+# 生产镜像构建使用的 Python 依赖源
+BACKEND_PIP_INDEX_URL="${BACKEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+BACKEND_PIP_TRUSTED_HOST="${BACKEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
+
 PROD_ENV_FILE="$ROOT_DIR/.env.production"
 PROD_COMPOSE=( -f docker-compose.prod.yml )
 
@@ -169,6 +173,8 @@ start_prod() {
   warn "请确认 DNS 已解析到本机: ${DOMAIN}"
   warn "请确认防火墙已开放 ${FRONTEND_PORT}、${BACKEND_PORT} 端口"
 
+  export BACKEND_PIP_INDEX_URL BACKEND_PIP_TRUSTED_HOST
+  info "后端 pip 依赖源: ${BACKEND_PIP_INDEX_URL}"
   info "构建并启动生产容器..."
   docker_compose_prod up --build -d
 

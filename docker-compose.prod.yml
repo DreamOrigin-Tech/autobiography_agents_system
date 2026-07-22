@@ -1,6 +1,10 @@
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${BACKEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
+        PIP_TRUSTED_HOST: ${BACKEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     restart: unless-stopped
     env_file:
       - ./backend/.env
