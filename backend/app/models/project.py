@@ -1,11 +1,20 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+if TYPE_CHECKING:
+    from app.models.agent_run import AgentRun
+    from app.models.chapter import Chapter
+    from app.models.interview import InterviewSession
+    from app.models.user import User
 
 
 class ProjectStatus(StrEnum):
@@ -24,6 +33,8 @@ class Project(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(50), default=ProjectStatus.PLANNING)
     style_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preference_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    memory_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -32,10 +32,26 @@ export interface ProjectBrief {
 
 export interface ProjectDetail extends ProjectBrief {
   style_notes?: string | null;
+  preference_notes?: string | null;
+  memory_notes?: string | null;
   is_published?: boolean;
   share_token?: string | null;
   published_at?: string | null;
   chapters: ChapterBrief[];
+}
+
+export interface AuthUser {
+  id: string;
+  name: string;
+  auth_provider: "local" | "wechat" | string;
+  avatar_url?: string | null;
+}
+
+export interface AuthProviders {
+  wechat_enabled: boolean;
+  password_enabled: boolean;
+  wechat_redirect_uri?: string | null;
+  wechat_issues?: string[];
 }
 
 export interface PublishedChapter {
@@ -57,6 +73,24 @@ export interface PublishResponse {
   published_chapter_count: number;
 }
 
+export interface PublishReadiness {
+  ready: boolean;
+  publishable_chapter_count: number;
+  risky_chapter_count: number;
+  message: string;
+  chapters: Array<{
+    chapter_id: string;
+    order: number;
+    title: string;
+    status: string;
+    quality_score: number;
+    quality_status: "good" | "needs_review" | "risky";
+    message: string;
+    risks: string[];
+    suggestions: string[];
+  }>;
+}
+
 export interface InterviewMessage {
   id: string;
   role: string;
@@ -70,6 +104,50 @@ export interface InterviewResult {
   suggested_action?: "continue" | "write_chapter";
   reason?: string;
   session_id?: string;
+  memory_updated?: boolean;
+  memory_notes?: string | null;
+  answer_quality?: AnswerQuality;
+}
+
+export interface AnswerQuality {
+  is_substantive: boolean;
+  score: number;
+  char_count: number;
+  missing_dimensions: string[];
+  reason: string;
+}
+
+export interface WriteReadiness {
+  ready: boolean;
+  user_answers: number;
+  user_chars: number;
+  min_user_answers: number;
+  min_user_chars: number;
+  message: string;
+}
+
+export interface ChapterCoverage {
+  score: number;
+  max_score: number;
+  percent: number;
+  covered_dimensions: string[];
+  missing_dimensions: string[];
+  message: string;
+  next_suggestion: string;
+}
+
+export interface ChapterQuality {
+  score: number;
+  max_score: number;
+  status: "good" | "needs_review" | "risky";
+  checks: Array<{
+    name: string;
+    passed: boolean;
+    detail: string;
+  }>;
+  risks: string[];
+  suggestions: string[];
+  message: string;
 }
 
 export interface EditPreview {

@@ -1,20 +1,77 @@
 import type {
   ChapterDetail,
+  ChapterCoverage,
+  ChapterQuality,
   EditPreview,
   InterviewMessage,
   InterviewResult,
   ProjectDetail,
   PublishedProject,
+  PublishReadiness,
   PublishResponse,
   Revision,
+  AuthProviders,
+  AuthUser,
+  WriteReadiness,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:6986/api";
 const TOKEN_KEY = "auth_token";
+const REQUEST_TIMEOUT_MS = 10_000;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+export function resolveApiBase(
+  configuredUrl: string | undefined,
+  pageUrl?: string,
+): string {
+  const page = pageUrl ? new URL(pageUrl) : null;
+  const fallback = page
+    ? `${page.protocol}//${page.hostname}:6986/api`
+    : "http://127.0.0.1:6986/api";
+  const rawBase = configuredUrl || fallback;
+
+  try {
+    const apiUrl = new URL(rawBase);
+    if (
+      page &&
+      LOOPBACK_HOSTS.has(page.hostname) &&
+      LOOPBACK_HOSTS.has(apiUrl.hostname)
+    ) {
+      apiUrl.hostname = page.hostname;
+    }
+    return apiUrl.toString().replace(/\/$/, "");
+  } catch {
+    return rawBase.replace(/\/$/, "");
+  }
+}
+
+function getApiBase(): string {
+  return resolveApiBase(
+    process.env.NEXT_PUBLIC_API_URL,
+    typeof window !== "undefined" ? window.location.href : undefined,
+  );
+}
+
+export function requestFailureMessage(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AbortError"
+  ) {
+    return "连接服务超时，请检查访问地址后重试";
+  }
+  if (error instanceof TypeError) {
+    return "无法连接服务，请检查访问地址后重试";
+  }
+  return error instanceof Error ? error.message : "请求失败，请稍后重试";
+}
 
 // ── Debug logging ───────────────────────────────────
 const DEBUG = typeof window !== "undefined"
-  && (window.location.hostname === "localhost" || new URLSearchParams(window.location.search).has("debug"));
+  && (
+    LOOPBACK_HOSTS.has(window.location.hostname)
+    || new URLSearchParams(window.location.search).has("debug")
+  );
 
 function apiLog(method: string, path: string, detail: string) {
   if (DEBUG) {
@@ -65,7 +122,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   apiLog(method, path, "→");
   const start = performance.now();
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new Error(requestFailureMessage(error));
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const elapsed = Math.round(performance.now() - start);
 
   if (res.status === 204) {
@@ -92,24 +163,41 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   // Auth
+  getAuthProviders: () => request<AuthProviders>("/auth/providers"),
   login: (password: string) =>
-    request<{ token: string; message: string }>("/auth/login", {
+    request<{ user: AuthUser; message: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
+  getMe: () => request<AuthUser>("/auth/me"),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
 
   // Projects
   listProjects: () => request<ProjectDetail[]>("/projects"),
 
-  createProject: (title: string, styleNotes?: string) =>
+  createProject: (
+    title: string,
+    options?: {
+      style_notes?: string;
+      preference_notes?: string;
+    },
+  ) =>
     request<ProjectDetail>("/projects", {
       method: "POST",
-      body: JSON.stringify({ title, style_notes: styleNotes }),
+      body: JSON.stringify({ title, ...options }),
     }),
 
   getProject: (id: string) => request<ProjectDetail>(`/projects/${id}`),
 
-  updateProject: (id: string, data: { title?: string; style_notes?: string }) =>
+  updateProject: (
+    id: string,
+    data: {
+      title?: string;
+      style_notes?: string;
+      preference_notes?: string;
+      memory_notes?: string;
+    },
+  ) =>
     request<ProjectDetail>(`/projects/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
@@ -149,6 +237,15 @@ export const api = {
     }),
 
   // Writing
+  getWriteReadiness: (chapterId: string) =>
+    request<WriteReadiness>(`/chapters/${chapterId}/write/readiness`),
+
+  getChapterCoverage: (chapterId: string) =>
+    request<ChapterCoverage>(`/chapters/${chapterId}/coverage`),
+
+  getChapterQuality: (chapterId: string) =>
+    request<ChapterQuality>(`/chapters/${chapterId}/quality`),
+
   writeChapter: (chapterId: string) =>
     request<ChapterDetail>(`/chapters/${chapterId}/write`, { method: "POST" }),
 
@@ -177,12 +274,19 @@ export const api = {
   publishProject: (projectId: string) =>
     request<PublishResponse>(`/projects/${projectId}/publish`, { method: "POST" }),
 
+  getPublishReadiness: (projectId: string) =>
+    request<PublishReadiness>(`/projects/${projectId}/publish/readiness`),
+
   unpublishProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${projectId}/unpublish`, { method: "POST" }),
 
   getPublicShare: (shareToken: string) =>
     request<PublishedProject>(`/public/share/${shareToken}`),
 };
+
+export function getWeChatLoginUrl(nextPath = "/"): string {
+  return `${getApiBase()}/auth/wechat/start?next=${encodeURIComponent(nextPath)}`;
+}
 
 // ── SSE streaming ───────────────────────────────────
 
@@ -192,12 +296,12 @@ export function streamWriteChapter(
   onDone: (content: string) => void,
   onError: (message: string) => void,
 ): () => void {
-  let url = `${API_BASE}/chapters/${chapterId}/write/stream`;
+  let url = `${getApiBase()}/chapters/${chapterId}/write/stream`;
   const token = getToken();
   if (token) {
     url += `?token=${encodeURIComponent(token)}`;
   }
-  const source = new EventSource(url);
+  const source = new EventSource(url, { withCredentials: true });
   let errorCount = 0;
   const MAX_ERRORS = 5;
 

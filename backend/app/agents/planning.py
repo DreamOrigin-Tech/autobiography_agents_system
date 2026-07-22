@@ -120,7 +120,7 @@ async def suggest_next_action(
     if interviewing > 0:
         return {
             "action": "continue_interview",
-            "message": f"当前章节采访进行中",
+            "message": "当前章节采访进行中",
             "priority": "high",
         }
 

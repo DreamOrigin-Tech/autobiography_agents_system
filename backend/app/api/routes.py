@@ -1,33 +1,55 @@
 import json
 import logging
+import secrets
 from collections.abc import AsyncGenerator
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from app.auth import verify_auth
+from app.auth import (
+    clear_session_cookie,
+    consume_oauth_state,
+    create_oauth_state,
+    create_session,
+    get_current_user,
+    get_or_create_local_user,
+    normalize_next_path,
+    revoke_current_session,
+    set_session_cookie,
+)
+from app.config import settings
 from app.db.session import get_db
-from app.models import Revision
+from app.models import Revision, User
 from app.rate_limit import rate_limit_llm
 from app.schemas import (
+    AuthProvidersResponse,
+    AuthUserResponse,
     ChapterManualUpdate,
+    ChapterCoverageResponse,
+    ChapterQualityResponse,
     EditApplyRequest,
     EditPreviewResponse,
     EditRequest,
     InterviewAnswerRequest,
     InterviewMessageSchema,
     LoginRequest,
+    LoginResponse,
     PlanRequest,
     ProjectCreate,
     ProjectDetail,
     ProjectUpdate,
     PublishedProject,
+    PublishReadinessResponse,
     PublishResponse,
     RevisionSchema,
+    WriteReadinessResponse,
 )
 from app.services import chapter_service, interview_service, project_service, publish_service
+from app.services import wechat_auth
 from app.services.patch import unified_diff
 
 logger = logging.getLogger(__name__)
@@ -37,12 +59,24 @@ router = APIRouter()
 
 # ── Auth ────────────────────────────────────────────
 
-@router.post("/auth/login")
-async def login(body: LoginRequest):
-    """Verify password and return a token (the password itself)."""
-    import secrets
+@router.get("/auth/providers", response_model=AuthProvidersResponse)
+async def auth_providers():
+    return AuthProvidersResponse(
+        wechat_enabled=settings.wechat_login_enabled,
+        password_enabled=bool(settings.access_password),
+        wechat_redirect_uri=settings.resolved_wechat_redirect_uri,
+        wechat_issues=settings.wechat_configuration_issues,
+    )
 
-    from app.config import settings
+
+@router.post("/auth/login", response_model=LoginResponse)
+async def login(
+    body: LoginRequest,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Local administrator fallback for development and legacy data."""
+    import secrets
 
     if not settings.access_password:
         raise HTTPException(status_code=400, detail="未配置 ACCESS_PASSWORD，请联系管理员")
@@ -50,8 +84,109 @@ async def login(body: LoginRequest):
     if not secrets.compare_digest(body.password, settings.access_password):
         logger.warning("Login failed: incorrect password")
         raise HTTPException(status_code=401, detail="密码错误")
-    logger.info("Login successful")
-    return {"token": settings.access_password, "message": "登录成功"}
+    user = await get_or_create_local_user(db)
+    token = await create_session(db, user)
+    await db.commit()
+    set_session_cookie(response, token)
+    logger.info("Local login successful user=%s", user.id)
+    return LoginResponse(user=AuthUserResponse.model_validate(user), message="登录成功")
+
+
+@router.get("/auth/me", response_model=AuthUserResponse)
+async def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+
+@router.post("/auth/logout", status_code=204)
+async def logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    await revoke_current_session(request, db)
+    clear_session_cookie(response)
+
+
+@router.get("/auth/wechat/start")
+async def wechat_login_start(
+    next_path: str = Query("/", alias="next"),
+    db: AsyncSession = Depends(get_db),
+):
+    if not settings.wechat_login_enabled:
+        raise HTTPException(status_code=503, detail="微信登录尚未配置")
+    state = await create_oauth_state(db, next_path)
+    await db.commit()
+    response = RedirectResponse(wechat_auth.build_authorize_url(state), status_code=307)
+    response.set_cookie(
+        key=settings.oauth_state_cookie_name,
+        value=state,
+        max_age=settings.oauth_state_ttl_minutes * 60,
+        httponly=True,
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+        path="/",
+    )
+    return response
+
+
+def _frontend_auth_redirect(next_path: str, error: str | None = None) -> str:
+    target = f"{settings.frontend_url.rstrip('/')}{normalize_next_path(next_path)}"
+    if error:
+        separator = "&" if "?" in target else "?"
+        target = f"{target}{separator}{urlencode({'auth_error': error})}"
+    return target
+
+
+@router.get("/auth/wechat/callback")
+async def wechat_login_callback(
+    request: Request,
+    code: str = "",
+    state: str = "",
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        cookie_state = request.cookies.get(settings.oauth_state_cookie_name, "")
+        if not cookie_state or not secrets.compare_digest(cookie_state, state):
+            raise ValueError("登录请求已失效，请重新扫码")
+        next_path = await consume_oauth_state(db, state)
+        await db.commit()
+        if not code:
+            raise ValueError("微信未返回授权码，请重新扫码")
+        token_payload = await wechat_auth.exchange_code(code)
+        profile = await wechat_auth.fetch_userinfo(
+            str(token_payload["access_token"]),
+            str(token_payload["openid"]),
+        )
+        if token_payload.get("unionid") and not profile.get("unionid"):
+            profile["unionid"] = token_payload["unionid"]
+        user = await wechat_auth.upsert_wechat_user(db, profile)
+        session_token = await create_session(db, user)
+        await db.commit()
+    except Exception as exc:
+        logger.warning("WeChat login failed: %s", exc)
+        await db.rollback()
+        response = RedirectResponse(
+            _frontend_auth_redirect("/", "微信登录失败，请重新扫码"),
+            status_code=307,
+        )
+        response.delete_cookie(
+            key=settings.oauth_state_cookie_name,
+            path="/",
+            secure=settings.session_cookie_secure,
+            samesite=settings.session_cookie_samesite,
+        )
+        return response
+
+    response = RedirectResponse(_frontend_auth_redirect(next_path), status_code=307)
+    set_session_cookie(response, session_token)
+    response.delete_cookie(
+        key=settings.oauth_state_cookie_name,
+        path="/",
+        secure=settings.session_cookie_secure,
+        samesite=settings.session_cookie_samesite,
+    )
+    return response
 
 
 # ── Projects ────────────────────────────────────────
@@ -60,33 +195,29 @@ async def login(body: LoginRequest):
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.create_project(db, body.title, body.style_notes)
-    return await project_service.get_project(db, project.id)
+    project = await project_service.create_project(
+        db, current_user, body.title, body.style_notes, body.preference_notes
+    )
+    return await project_service.get_project(db, project.id, current_user.id)
 
 
 @router.get("/projects", response_model=list[ProjectDetail])
 async def list_projects(
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    projects = await project_service.list_projects(db)
-    detailed = []
-    for p in projects:
-        detail = await project_service.get_project(db, p.id)
-        if detail:
-            detailed.append(detail)
-    return detailed
+    return await project_service.list_projects(db, current_user.id)
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail)
 async def get_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return project
@@ -96,10 +227,10 @@ async def get_project(
 async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.warning("Delete project id=%s", project_id)
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     await project_service.delete_project(db, project)
@@ -111,13 +242,20 @@ async def update_project(
     project_id: str,
     body: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    await project_service.update_project(db, project, body.title, body.style_notes)
-    return await project_service.get_project(db, project_id)
+    await project_service.update_project(
+        db,
+        project,
+        body.title,
+        body.style_notes,
+        body.preference_notes,
+        body.memory_notes,
+    )
+    return await project_service.get_project(db, project_id, current_user.id)
 
 
 @router.post("/projects/{project_id}/plan", response_model=ProjectDetail)
@@ -126,34 +264,37 @@ async def plan_project(
     body: PlanRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Plan project %s — author_background length=%d", project_id, len(body.author_background))
     rate_limit_llm(request)
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     await project_service.plan_project_outline(db, project, body.author_background)
     logger.info("Plan project %s — done, chapters=%d", project_id, len(project.chapters))
-    return await project_service.get_project(db, project_id)
+    return await project_service.get_project(db, project_id, current_user.id)
 
 
 @router.get("/projects/{project_id}/chapters")
 async def get_project_chapters(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    return await chapter_service.list_chapters(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return await chapter_service.list_chapters(db, project_id, current_user.id)
 
 
 @router.get("/chapters/{chapter_id}")
 async def get_chapter(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     return chapter
@@ -164,9 +305,9 @@ async def manual_update_chapter(
     chapter_id: str,
     body: ChapterManualUpdate,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     updated = await chapter_service.manual_update_chapter(db, chapter, body.content_md)
@@ -178,11 +319,11 @@ async def start_interview(
     chapter_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Start interview chapter=%s", chapter_id)
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await interview_service.generate_interview_question(db, chapter)
@@ -194,9 +335,9 @@ async def start_interview(
 async def get_interview_messages(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     from app.models import InterviewSession
@@ -217,11 +358,11 @@ async def submit_interview_answer(
     body: InterviewAnswerRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Interview answer chapter=%s answer_len=%d", chapter_id, len(body.content))
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await interview_service.submit_answer(db, chapter, body.content)
@@ -234,10 +375,10 @@ async def stream_interview(
     chapter_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
 
@@ -257,16 +398,65 @@ async def write_chapter(
     chapter_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Write chapter (non-stream) chapter=%s", chapter_id)
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
-    updated = await chapter_service.write_chapter_content(db, chapter)
+    try:
+        updated = await chapter_service.write_chapter_content(db, chapter)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("Write chapter chapter=%s — done, content_len=%d", chapter_id, len(updated.content_md or ""))
     return updated
+
+
+@router.get("/chapters/{chapter_id}/write/readiness", response_model=WriteReadinessResponse)
+async def get_write_readiness(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    messages = await chapter_service.get_interview_messages(db, chapter)
+    return chapter_service.write_readiness(messages)
+
+
+@router.get("/chapters/{chapter_id}/coverage", response_model=ChapterCoverageResponse)
+async def get_chapter_coverage(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    messages = await chapter_service.get_interview_messages(db, chapter)
+    return chapter_service.chapter_coverage(messages)
+
+
+@router.get("/chapters/{chapter_id}/quality", response_model=ChapterQualityResponse)
+async def get_chapter_quality(
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    project = await project_service.get_project(db, chapter.project_id, current_user.id)
+    messages = await chapter_service.get_interview_messages(db, chapter)
+    return chapter_service.chapter_quality_report(
+        chapter.content_md,
+        messages,
+        project.style_notes if project else None,
+        project.preference_notes if project else None,
+        project.memory_notes if project else None,
+    )
 
 
 @router.get("/chapters/{chapter_id}/write/stream")
@@ -274,11 +464,11 @@ async def stream_write_chapter(
     chapter_id: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Write chapter (SSE stream) chapter=%s", chapter_id)
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
 
@@ -290,7 +480,7 @@ async def stream_write_chapter(
                 token_count += 1
                 yield {"event": "token", "data": json.dumps({"text": token}, ensure_ascii=False)}
             logger.info("SSE write done chapter=%s tokens=%d", chapter_id, token_count)
-            refreshed = await chapter_service.get_chapter(db, chapter_id)
+            refreshed = await chapter_service.get_chapter(db, chapter_id, current_user.id)
             yield {
                 "event": "done",
                 "data": json.dumps(
@@ -311,11 +501,11 @@ async def preview_edit(
     body: EditRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     logger.info("Preview edit chapter=%s instruction_len=%d", chapter_id, len(body.instruction))
     rate_limit_llm(request)
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     revision = await chapter_service.preview_edit(db, chapter, body.instruction)
@@ -339,9 +529,9 @@ async def apply_edit(
     chapter_id: str,
     body: EditApplyRequest,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await db.execute(select(Revision).where(Revision.id == body.revision_id))
@@ -357,9 +547,9 @@ async def rollback_revision(
     chapter_id: str,
     revision_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     result = await db.execute(select(Revision).where(Revision.id == revision_id))
@@ -374,8 +564,11 @@ async def rollback_revision(
 async def list_revisions(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
     return await chapter_service.list_revisions(db, chapter_id)
 
 
@@ -383,9 +576,9 @@ async def list_revisions(
 async def publish_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     try:
@@ -400,17 +593,29 @@ async def publish_project(
     )
 
 
+@router.get("/projects/{project_id}/publish/readiness", response_model=PublishReadinessResponse)
+async def get_publish_readiness(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return await publish_service.publish_readiness(db, project)
+
+
 @router.post("/projects/{project_id}/unpublish", response_model=ProjectDetail)
 async def unpublish_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     await publish_service.unpublish_project(db, project)
-    return await project_service.get_project(db, project_id)
+    return await project_service.get_project(db, project_id, current_user.id)
 
 
 @router.get("/public/share/{share_token}", response_model=PublishedProject)
@@ -430,9 +635,9 @@ async def get_public_project(share_token: str, db: AsyncSession = Depends(get_db
 async def get_project_timeline(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     try:
@@ -448,9 +653,9 @@ async def get_project_timeline(
 async def get_chapter_reflection(
     chapter_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
-    chapter = await chapter_service.get_chapter(db, chapter_id)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     notes = {}
@@ -478,11 +683,11 @@ async def get_chapter_reflection(
 async def review_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
-    _: bool = Depends(verify_auth),
+    current_user: User = Depends(get_current_user),
 ):
     from app.agents.orchestra import orchestra
 
-    project = await project_service.get_project(db, project_id)
+    project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 

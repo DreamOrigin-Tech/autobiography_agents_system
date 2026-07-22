@@ -3,6 +3,7 @@ from httpx import ASGITransport, AsyncClient
 
 from app.db.session import init_db
 from app.main import app
+from conftest import login_test_user
 
 
 @pytest.fixture(autouse=True)
@@ -15,6 +16,7 @@ async def setup_db():
 async def test_manual_update_chapter():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await login_test_user(client)
         create_res = await client.post("/api/projects", json={"title": "手动编辑测试"})
         project_id = create_res.json()["id"]
         await client.post(

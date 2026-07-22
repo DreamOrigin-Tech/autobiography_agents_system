@@ -1,10 +1,12 @@
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.agents.interviewer import generate_question, parse_topics
+from app.agents.memory import memory
 from app.models import (
     Chapter,
     ChapterStatus,
@@ -13,7 +15,7 @@ from app.models import (
     Project,
     ProjectStatus,
 )
-from app.services.chapter_service import get_chapter
+from app.services.chapter_service import chapter_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,10 @@ async def add_message(
 ) -> InterviewMessage:
     message = InterviewMessage(session_id=session.id, role=role, content=content)
     db.add(message)
+    result = await db.execute(select(Project).where(Project.id == session.project_id))
+    project = result.scalar_one_or_none()
+    if project:
+        project.updated_at = datetime.now(UTC)
     await db.commit()
     await db.refresh(message)
     return message
@@ -77,6 +83,13 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
     msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
     topics = parse_topics(chapter.interview_topics)
     summaries = await get_chapter_summaries(db, project.id, chapter.order)
+    preference_context = memory.preference_context(
+        project.style_notes,
+        project.preference_notes,
+        project.memory_notes,
+    )
+    coverage = chapter_coverage(msg_dicts)
+    coverage_context = _coverage_prompt_context(coverage)
 
     # ── Agent: Memory-guided interview ──
     from app.agents.orchestra import orchestra
@@ -89,7 +102,14 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
     if unanswered:
         topics_with_hint = unanswered + [t for t in topics if t not in unanswered]
 
-    result = await generate_question(chapter.title, topics_with_hint, msg_dicts, summaries)
+    result = await generate_question(
+        chapter.title,
+        topics_with_hint,
+        msg_dicts,
+        summaries,
+        preference_context,
+        coverage_context,
+    )
     question = result.get("question", "请分享一个让您印象最深刻的故事。")
 
     # Override suggested_action with orchestra's assessment
@@ -108,6 +128,7 @@ async def generate_interview_question(db: AsyncSession, chapter: Chapter) -> dic
         "reason": result.get("reason", ""),
         "session_id": session.id,
         "unanswered_topics": unanswered,
+        "chapter_coverage": coverage,
     }
 
 
@@ -116,4 +137,41 @@ async def submit_answer(db: AsyncSession, chapter: Chapter, content: str) -> dic
     project = project_result.scalar_one()
     session = await get_or_create_session(db, project, chapter)
     await add_message(db, session, "user", content)
-    return await generate_interview_question(db, chapter)
+    previous_notes = project.memory_notes
+    learned_notes = memory.learn_preference_from_answer(content, project.memory_notes)
+    memory_updated = learned_notes != previous_notes
+    if memory_updated:
+        project.memory_notes = learned_notes
+        await db.commit()
+    topics = parse_topics(chapter.interview_topics)
+    quality = memory.answer_quality(content)
+    if not quality["is_substantive"]:
+        question = memory.detail_followup_question(content, chapter.title, topics)
+        await add_message(db, session, "agent", question)
+        return {
+            "question": question,
+            "intent": "追问细节",
+            "suggested_action": "continue",
+            "reason": quality["reason"],
+            "session_id": session.id,
+            "memory_updated": memory_updated,
+            "memory_notes": learned_notes,
+            "answer_quality": quality,
+        }
+    result = await generate_interview_question(db, chapter)
+    result["memory_updated"] = memory_updated
+    result["memory_notes"] = learned_notes
+    result["answer_quality"] = quality
+    return result
+
+
+def _coverage_prompt_context(coverage: dict) -> str:
+    missing = coverage.get("missing_dimensions", [])
+    covered = coverage.get("covered_dimensions", [])
+    return (
+        f"完成度：{coverage.get('score', 0)}/{coverage.get('max_score', 5)}，"
+        f"{coverage.get('percent', 0)}%。\n"
+        f"已覆盖：{', '.join(covered) if covered else '暂无'}\n"
+        f"缺失维度：{', '.join(missing) if missing else '无'}\n"
+        f"下一问策略：{coverage.get('next_suggestion', '')}"
+    )

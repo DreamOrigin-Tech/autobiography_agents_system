@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     await init_db()
     logger.info(
-        "LLM ready: model=%s deepseek_key=%s auth=%s",
+        "LLM ready: model=%s deepseek_key=%s wechat_login=%s password_login=%s",
         settings.resolved_model,
         bool(settings.effective_deepseek_api_key),
+        settings.wechat_login_enabled,
         bool(settings.access_password),
     )
     yield
@@ -29,6 +30,7 @@ app = FastAPI(title="Autobiography Agent API", version="0.2.0", lifespan=lifespa
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -55,5 +57,7 @@ async def health():
         "llm_configured": bool(
             settings.effective_deepseek_api_key if settings.is_deepseek else settings.effective_openai_api_key
         ),
-        "auth_enabled": bool(settings.access_password),
+        "auth_enabled": True,
+        "wechat_login_enabled": settings.wechat_login_enabled,
+        "password_login_enabled": bool(settings.access_password),
     }

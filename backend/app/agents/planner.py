@@ -9,3 +9,9 @@ from app.agents.planning import (
 # Keep old names for backward compatibility with existing services
 plan_outline = create_plan
 plan_outline_fallback = create_plan_fallback
+
+__all__ = [
+    "plan_outline",
+    "plan_outline_fallback",
+    "topics_to_text",
+]

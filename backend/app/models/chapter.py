@@ -1,11 +1,19 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
+
+if TYPE_CHECKING:
+    from app.models.interview import InterviewSession
+    from app.models.project import Project
+    from app.models.revision import Revision
 
 
 class ChapterStatus(StrEnum):

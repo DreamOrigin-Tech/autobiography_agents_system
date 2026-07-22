@@ -59,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
                 : t.type === "error"
                 ? "bg-[#fef2f2] text-[#991b1b] border border-[#fecaca]"
-                : "bg-[#eef2ff] text-[#3730a3] border border-[#c7d2fe]"
+                : "bg-[#f0fdfa] text-[#115e59] border border-[#b8dcd7]"
             }`}
           >
             <span className="mr-2">

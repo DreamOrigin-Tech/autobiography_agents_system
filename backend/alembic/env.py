@@ -7,9 +7,11 @@ from app.config import settings
 from app.db.session import Base
 from app.models import (  # noqa: F401
     AgentRun,
+    AuthSession,
     Chapter,
     InterviewMessage,
     InterviewSession,
+    OAuthState,
     Project,
     Revision,
     User,

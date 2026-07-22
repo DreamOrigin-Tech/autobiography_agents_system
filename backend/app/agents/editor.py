@@ -29,10 +29,14 @@ EDITOR_SYSTEM = """你是一位精准的自传编辑。根据作者指令，对�
 async def generate_edit(
     content: str,
     instruction: str,
+    preference_context: str | None = None,
 ) -> tuple[list[dict], str, str]:
     numbered, _ = number_paragraphs(content)
     user_content = f"""原文（带段落编号）：
 {numbered or '（空内容）'}
+
+用户偏好与长期记忆：
+{preference_context or '（暂无）'}
 
 修改指令：{instruction}
 

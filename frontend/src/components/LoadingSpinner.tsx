@@ -2,11 +2,11 @@ export function LoadingSpinner({ label = "加载中..." }: { label?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-16">
       <div className="flex gap-1.5">
-        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#a5b4fc]" style={{ animationDelay: "0ms" }} />
-        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#818cf8]" style={{ animationDelay: "150ms" }} />
-        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#6366f1]" style={{ animationDelay: "300ms" }} />
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#5eead4]" style={{ animationDelay: "0ms" }} />
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#d97706]" style={{ animationDelay: "150ms" }} />
+        <div className="h-2.5 w-2.5 animate-bounce rounded-full bg-[#0f766e]" style={{ animationDelay: "300ms" }} />
       </div>
-      <p className="text-sm text-[#a5a0c8]">{label}</p>
+      <p className="text-sm text-[#98a2b3]">{label}</p>
     </div>
   );
 }

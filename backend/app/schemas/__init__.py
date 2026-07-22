@@ -23,14 +23,38 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
+class AuthUserResponse(BaseModel):
+    id: str
+    name: str
+    auth_provider: str
+    avatar_url: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AuthProvidersResponse(BaseModel):
+    wechat_enabled: bool
+    password_enabled: bool
+    wechat_redirect_uri: str | None = None
+    wechat_issues: list[str] = Field(default_factory=list)
+
+
+class LoginResponse(BaseModel):
+    user: AuthUserResponse
+    message: str
+
+
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     style_notes: str | None = None
+    preference_notes: str | None = None
 
 
 class ProjectUpdate(BaseModel):
     title: str | None = None
     style_notes: str | None = None
+    preference_notes: str | None = None
+    memory_notes: str | None = None
 
 
 class ChapterBrief(BaseModel):
@@ -62,6 +86,8 @@ class ProjectBrief(BaseModel):
 
 class ProjectDetail(ProjectBrief):
     style_notes: str | None = None
+    preference_notes: str | None = None
+    memory_notes: str | None = None
     is_published: bool = False
     share_token: str | None = None
     published_at: datetime | None = None
@@ -87,6 +113,26 @@ class PublishResponse(BaseModel):
     published_chapter_count: int
 
 
+class PublishReadinessChapter(BaseModel):
+    chapter_id: str
+    order: int
+    title: str
+    status: str
+    quality_score: int
+    quality_status: str
+    message: str
+    risks: list[str]
+    suggestions: list[str]
+
+
+class PublishReadinessResponse(BaseModel):
+    ready: bool
+    publishable_chapter_count: int
+    risky_chapter_count: int
+    message: str
+    chapters: list[PublishReadinessChapter]
+
+
 class PlanRequest(BaseModel):
     author_background: str = Field(
         default="",
@@ -108,6 +154,35 @@ class EditApplyRequest(BaseModel):
 
 class ChapterManualUpdate(BaseModel):
     content_md: str = Field(min_length=0)
+
+
+class WriteReadinessResponse(BaseModel):
+    ready: bool
+    user_answers: int
+    user_chars: int
+    min_user_answers: int
+    min_user_chars: int
+    message: str
+
+
+class ChapterCoverageResponse(BaseModel):
+    score: int
+    max_score: int
+    percent: int
+    covered_dimensions: list[str]
+    missing_dimensions: list[str]
+    message: str
+    next_suggestion: str
+
+
+class ChapterQualityResponse(BaseModel):
+    score: int
+    max_score: int
+    status: str
+    checks: list[dict[str, str | bool]]
+    risks: list[str]
+    suggestions: list[str]
+    message: str
 
 
 class PatchOperation(BaseModel):

@@ -25,15 +25,15 @@ export function BottomNav({ projectId, activeChapterId }: BottomNavProps) {
   ];
 
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-50 border-t border-[#e2e0f0] bg-white/80 backdrop-blur-xl pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="项目导航" className="fixed bottom-0 inset-x-0 z-50 border-t border-[#dfe5eb] bg-white/92 backdrop-blur-xl pb-[env(safe-area-inset-bottom)] md:hidden">
       <div className="mx-auto flex max-w-lg">
         {tabs.map((tab) => {
           const active = tab.match === `/project/${projectId}` ? pathname === tab.match : pathname.includes(tab.match);
           return (
             <Link key={tab.label} href={tab.href}
-              className={`relative flex flex-1 flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors ${active ? "text-[#6366f1]" : "text-[#a5a0c8] hover:text-[#6b6889]"}`}>
+              className={`relative flex flex-1 flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors ${active ? "text-[#0f766e]" : "text-[#98a2b3] hover:text-[#667085]"}`}>
               {tab.icon}{tab.label}
-              {active && <span className="absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-[#6366f1]" />}
+              {active && <span className="absolute bottom-0 left-1/2 h-0.5 w-6 -translate-x-1/2 rounded-full bg-[#0f766e]" />}
             </Link>
           );
         })}

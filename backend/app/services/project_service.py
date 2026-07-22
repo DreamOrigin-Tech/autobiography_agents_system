@@ -1,4 +1,3 @@
-import json
 import logging
 
 from sqlalchemy import select
@@ -11,35 +10,39 @@ from app.models import Chapter, ChapterStatus, Project, ProjectStatus, User
 logger = logging.getLogger(__name__)
 
 
-async def get_or_create_default_user(db: AsyncSession) -> User:
-    result = await db.execute(select(User).limit(1))
-    user = result.scalar_one_or_none()
-    if user:
-        return user
-    user = User(name="默认用户")
-    db.add(user)
-    await db.flush()
-    return user
-
-
-async def create_project(db: AsyncSession, title: str, style_notes: str | None) -> Project:
-    user = await get_or_create_default_user(db)
-    project = Project(user_id=user.id, title=title, style_notes=style_notes)
+async def create_project(
+    db: AsyncSession,
+    user: User,
+    title: str,
+    style_notes: str | None,
+    preference_notes: str | None = None,
+) -> Project:
+    project = Project(
+        user_id=user.id,
+        title=title,
+        style_notes=style_notes,
+        preference_notes=preference_notes,
+    )
     db.add(project)
     await db.commit()
     await db.refresh(project)
     return project
 
 
-async def list_projects(db: AsyncSession) -> list[Project]:
-    result = await db.execute(select(Project).order_by(Project.updated_at.desc()))
+async def list_projects(db: AsyncSession, user_id: str) -> list[Project]:
+    result = await db.execute(
+        select(Project)
+        .where(Project.user_id == user_id)
+        .options(selectinload(Project.chapters))
+        .order_by(Project.updated_at.desc())
+    )
     return list(result.scalars().all())
 
 
-async def get_project(db: AsyncSession, project_id: str) -> Project | None:
+async def get_project(db: AsyncSession, project_id: str, user_id: str) -> Project | None:
     result = await db.execute(
         select(Project)
-        .where(Project.id == project_id)
+        .where(Project.id == project_id, Project.user_id == user_id)
         .options(selectinload(Project.chapters))
         .execution_options(populate_existing=True)
     )
@@ -47,12 +50,21 @@ async def get_project(db: AsyncSession, project_id: str) -> Project | None:
 
 
 async def update_project(
-    db: AsyncSession, project: Project, title: str | None, style_notes: str | None
+    db: AsyncSession,
+    project: Project,
+    title: str | None,
+    style_notes: str | None,
+    preference_notes: str | None = None,
+    memory_notes: str | None = None,
 ) -> Project:
     if title is not None:
         project.title = title
     if style_notes is not None:
         project.style_notes = style_notes
+    if preference_notes is not None:
+        project.preference_notes = preference_notes
+    if memory_notes is not None:
+        project.memory_notes = memory_notes
     await db.commit()
     await db.refresh(project)
     return project
@@ -71,11 +83,11 @@ async def plan_project_outline(
         outline = await plan_outline(project.title, author_background, project.style_notes)
         if not outline.chapters:
             logger.warning("LLM returned empty chapters for project=%s, using fallback", project.id)
-            outline = await plan_outline_fallback(project.title)
+            outline = plan_outline_fallback(project.title)
             used_fallback = True
     except Exception:
         logger.exception("LLM plan failed for project=%s, using fallback", project.id)
-        outline = await plan_outline_fallback(project.title)
+        outline = plan_outline_fallback(project.title)
         used_fallback = True
 
     if used_fallback:

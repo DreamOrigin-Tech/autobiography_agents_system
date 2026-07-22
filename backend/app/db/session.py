@@ -22,8 +22,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_db() -> None:
     from app.models import (  # noqa: F401
         agent_run,
+        auth_session,
         chapter,
         interview,
+        oauth_state,
         project,
         revision,
         user,
@@ -38,6 +40,26 @@ def _migrate_schema(connection) -> None:
     if connection.dialect.name != "sqlite":
         return
 
+    # ── users table ──
+    user_cols = {
+        row[1]
+        for row in connection.exec_driver_sql("PRAGMA table_info(users)").fetchall()
+    }
+    _add_column_if_missing(
+        connection, "users", "auth_provider", "VARCHAR(32) NOT NULL DEFAULT 'local'", user_cols
+    )
+    _add_column_if_missing(connection, "users", "provider_subject", "VARCHAR(255)", user_cols)
+    _add_column_if_missing(connection, "users", "wechat_openid", "VARCHAR(128)", user_cols)
+    _add_column_if_missing(connection, "users", "wechat_unionid", "VARCHAR(128)", user_cols)
+    _add_column_if_missing(connection, "users", "avatar_url", "VARCHAR(1024)", user_cols)
+    _add_column_if_missing(connection, "users", "last_login_at", "DATETIME", user_cols)
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_wechat_openid ON users (wechat_openid)"
+    )
+    connection.exec_driver_sql(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_wechat_unionid ON users (wechat_unionid)"
+    )
+
     # ── projects table ──
     proj_cols = {
         row[1]
@@ -47,6 +69,8 @@ def _migrate_schema(connection) -> None:
     _add_column_if_missing(connection, "projects", "share_token", "VARCHAR(64)", proj_cols)
     _add_column_if_missing(connection, "projects", "published_at", "DATETIME", proj_cols)
     _add_column_if_missing(connection, "projects", "timeline_json", "TEXT", proj_cols)
+    _add_column_if_missing(connection, "projects", "preference_notes", "TEXT", proj_cols)
+    _add_column_if_missing(connection, "projects", "memory_notes", "TEXT", proj_cols)
 
     # ── chapters table ──
     ch_cols = {

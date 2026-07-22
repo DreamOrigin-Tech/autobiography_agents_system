@@ -1,20 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Noto_Serif_SC } from "next/font/google";
+import AuthGate from "@/components/AuthGate";
 import { StartupGate } from "@/components/StartupGate";
 import { ToastProvider } from "@/components/Toast";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const notoSerif = Noto_Serif_SC({
-  variable: "--font-noto-serif",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "http://jiumozhi.tech:6985"),
@@ -35,10 +23,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" className={`${geistSans.variable} ${notoSerif.variable} h-full`}>
+    <html lang="zh-CN" className="h-full">
       <body className="min-h-full antialiased">
         <ToastProvider>
-          <StartupGate>{children}</StartupGate>
+          <StartupGate>
+            <AuthGate>{children}</AuthGate>
+          </StartupGate>
         </ToastProvider>
       </body>
     </html>

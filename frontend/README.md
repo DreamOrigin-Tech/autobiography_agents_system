@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 自传 Agent 前端
 
-## Getting Started
+这是自传 Agent 系统的 Next.js 前端，默认连接本地后端：
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```text
+http://127.0.0.1:6986/api
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 开发启动
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm install
+cp .env.local.example .env.local
+npm run dev -- --hostname 127.0.0.1 --port 6985
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+打开：
 
-## Learn More
+```text
+http://127.0.0.1:6985
+```
 
-To learn more about Next.js, take a look at the following resources:
+## 检查
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 主要页面
 
-## Deploy on Vercel
+- `/`：项目列表、新建自传、偏好采集
+- `/project/[id]`：章节列表、项目进度和下一步
+- `/project/[id]/interview/[chapterId]`：采访、偏好补充、素材进度、草稿自动保存
+- `/project/[id]/chapter/[chapterId]`：阅读、AI 写作、手动编辑、质量检查、修改历史
+- `/project/[id]/settings`：项目设置、记忆编辑、发布检查、分享链接
+- `/share/[token]`：公开阅读页
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+更多说明见仓库根目录 `README.md`。
