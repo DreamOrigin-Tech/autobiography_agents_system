@@ -50,6 +50,8 @@ export interface AuthUser {
 export interface AuthProviders {
   wechat_enabled: boolean;
   password_enabled: boolean;
+  auth_required?: boolean;
+  dev_auth_bypass?: boolean;
   wechat_redirect_uri?: string | null;
   wechat_issues?: string[];
 }

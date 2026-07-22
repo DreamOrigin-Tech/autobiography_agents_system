@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./autobiography.db"
     cors_origins: str = "http://localhost:6985"
     access_password: str = ""
+    dev_auth_bypass: bool = False
     frontend_url: str = "http://localhost:6985"
     public_api_url: str = "http://localhost:6986"
     session_cookie_name: str = "autobiography_session"

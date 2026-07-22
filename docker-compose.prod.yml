@@ -11,6 +11,7 @@ services:
     environment:
       DATABASE_URL: sqlite+aiosqlite:////data/autobiography.db
       CORS_ORIGINS: ${CORS_ORIGINS:-http://jiumozhi.tech:6985}
+      DEV_AUTH_BYPASS: "false"
     command: uvicorn app.main:app --host 0.0.0.0 --port 6986 --workers 2
     ports:
       - "6986:6986"

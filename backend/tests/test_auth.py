@@ -5,6 +5,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from app.auth import create_oauth_state, create_session, consume_oauth_state, hash_token
+from app.config import settings
 from app.db.session import async_session, init_db
 from app.main import app
 from app.models import Chapter, ChapterStatus, Project, User
@@ -40,6 +41,20 @@ async def test_private_api_requires_login():
 
     assert response.status_code == 401
     assert response.json()["detail"] == "请先登录"
+
+
+@pytest.mark.asyncio
+async def test_dev_auth_bypass_allows_private_api_without_a_session(monkeypatch):
+    monkeypatch.setattr(settings, "dev_auth_bypass", True)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/api/projects")
+        providers = await client.get("/api/auth/providers")
+
+    assert response.status_code == 200
+    assert providers.status_code == 200
+    assert providers.json()["auth_required"] is False
+    assert providers.json()["dev_auth_bypass"] is True
 
 
 @pytest.mark.asyncio

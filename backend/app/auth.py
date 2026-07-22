@@ -146,6 +146,12 @@ async def get_current_user(
     query_token: str = Query("", alias="token"),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    if settings.dev_auth_bypass:
+        user = await get_or_create_local_user(db)
+        await db.commit()
+        request.state.dev_auth_bypass = True
+        return user
+
     token = _request_token(request, credentials, query_token)
     if token:
         result = await db.execute(

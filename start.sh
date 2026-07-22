@@ -167,6 +167,7 @@ start_prod() {
 
   ensure_production_env
   cd "$ROOT_DIR"
+  export DEV_AUTH_BYPASS=false
 
   info "生产部署: http://${DOMAIN}:${FRONTEND_PORT}"
   info "API 地址: http://${DOMAIN}:${BACKEND_PORT}/api"
@@ -242,6 +243,8 @@ start_dev() {
 
   info "启动后端 (port ${BACKEND_PORT})..."
   cd "$BACKEND_DIR"
+  export DEV_AUTH_BYPASS=true
+  info "开发模式免登录已开启（仅当前开发进程）"
   # shellcheck disable=SC1091
   source .venv/bin/activate
   uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" \

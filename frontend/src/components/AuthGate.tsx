@@ -68,7 +68,9 @@ export default function AuthGate({ children }: AuthGateProps) {
 
   return (
     <div className="min-h-screen">
-      <AccountBar user={user} onLoggedOut={() => setStatus("anonymous")} />
+      {providers?.dev_auth_bypass !== true && (
+        <AccountBar user={user} onLoggedOut={() => setStatus("anonymous")} />
+      )}
       {children}
     </div>
   );

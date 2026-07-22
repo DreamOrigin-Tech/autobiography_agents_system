@@ -58,6 +58,7 @@ async def health():
             settings.effective_deepseek_api_key if settings.is_deepseek else settings.effective_openai_api_key
         ),
         "auth_enabled": True,
+        "dev_auth_bypass": settings.dev_auth_bypass,
         "wechat_login_enabled": settings.wechat_login_enabled,
         "password_login_enabled": bool(settings.access_password),
     }

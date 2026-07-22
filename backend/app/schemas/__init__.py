@@ -35,6 +35,8 @@ class AuthUserResponse(BaseModel):
 class AuthProvidersResponse(BaseModel):
     wechat_enabled: bool
     password_enabled: bool
+    auth_required: bool = True
+    dev_auth_bypass: bool = False
     wechat_redirect_uri: str | None = None
     wechat_issues: list[str] = Field(default_factory=list)
 

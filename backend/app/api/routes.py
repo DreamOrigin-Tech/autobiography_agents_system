@@ -64,6 +64,8 @@ async def auth_providers():
     return AuthProvidersResponse(
         wechat_enabled=settings.wechat_login_enabled,
         password_enabled=bool(settings.access_password),
+        auth_required=not settings.dev_auth_bypass,
+        dev_auth_bypass=settings.dev_auth_bypass,
         wechat_redirect_uri=settings.resolved_wechat_redirect_uri,
         wechat_issues=settings.wechat_configuration_issues,
     )

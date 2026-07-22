@@ -82,6 +82,14 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 6986
 curl http://127.0.0.1:6986/health
 ```
 
+本地开发可以直接使用一键启动：
+
+```bash
+./start.sh dev
+```
+
+该命令会临时开启开发免登录，方便本地调试；`./start.sh prod` 会强制关闭免登录，生产环境仍要求用户登录。
+
 API 文档：
 
 ```text
