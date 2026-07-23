@@ -31,11 +31,7 @@ export function resolveApiBase(
 
   try {
     const apiUrl = new URL(rawBase);
-    if (
-      page &&
-      LOOPBACK_HOSTS.has(page.hostname) &&
-      LOOPBACK_HOSTS.has(apiUrl.hostname)
-    ) {
+    if (page && LOOPBACK_HOSTS.has(apiUrl.hostname)) {
       apiUrl.hostname = page.hostname;
     }
     return apiUrl.toString().replace(/\/$/, "");

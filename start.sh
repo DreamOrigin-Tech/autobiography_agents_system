@@ -167,6 +167,19 @@ wait_for_url() {
   return 1
 }
 
+ensure_process_running() {
+  local pid="$1"
+  local name="$2"
+
+  if kill -0 "$pid" 2>/dev/null; then
+    ok "${name} 进程运行中 (PID ${pid})"
+    return 0
+  fi
+
+  error "${name} 进程启动后退出，请检查日志"
+  return 1
+}
+
 print_urls() {
   echo
   echo "========================================"
@@ -296,13 +309,14 @@ start_dev() {
   info "开发模式免登录已开启（仅当前开发进程）"
   # shellcheck disable=SC1091
   source .venv/bin/activate
-  uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" \
-    > "$ROOT_DIR/.backend.log" 2>&1 &
+  nohup uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT" \
+    </dev/null > "$ROOT_DIR/.backend.log" 2>&1 &
   BACKEND_PID=$!
 
   info "启动前端 (port ${FRONTEND_PORT})..."
   cd "$FRONTEND_DIR"
-  npm run dev -- -p "$FRONTEND_PORT" > "$ROOT_DIR/.frontend.log" 2>&1 &
+  nohup npm run dev -- -p "$FRONTEND_PORT" \
+    </dev/null > "$ROOT_DIR/.frontend.log" 2>&1 &
   FRONTEND_PID=$!
 
   echo "$BACKEND_PID" > "$PID_FILE"
@@ -310,6 +324,8 @@ start_dev() {
 
   wait_for_url "http://localhost:${BACKEND_PORT}/health" "后端" 30 || true
   wait_for_url "http://localhost:${FRONTEND_PORT}" "前端" 45 || true
+  ensure_process_running "$BACKEND_PID" "后端" || true
+  ensure_process_running "$FRONTEND_PID" "前端" || true
 
   print_urls
   info "后端日志: tail -f $ROOT_DIR/.backend.log"

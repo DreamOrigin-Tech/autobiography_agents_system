@@ -47,6 +47,12 @@ class Settings(BaseSettings):
         return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     @property
+    def effective_cors_origin_regex(self) -> str:
+        if self.dev_auth_bypass:
+            return r"^https?://[^/]+(?::\d+)?$"
+        return self.cors_origin_regex
+
+    @property
     def effective_deepseek_api_key(self) -> str:
         if _is_valid_key(self.deepseek_api_key):
             return self.deepseek_api_key

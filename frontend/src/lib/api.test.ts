@@ -16,6 +16,10 @@ test("local API URL follows the hostname used to open the frontend", async () =>
     resolveApiBase("http://127.0.0.1:6986/api", "http://localhost:6985/"),
     "http://localhost:6986/api",
   );
+  assert.equal(
+    resolveApiBase("http://localhost:6986/api", "http://203.0.113.20:6985/"),
+    "http://203.0.113.20:6986/api",
+  );
 });
 
 test("API timeouts use a clear retryable message", async () => {
