@@ -306,6 +306,7 @@ start_dev() {
   info "启动后端 (port ${BACKEND_PORT})..."
   cd "$BACKEND_DIR"
   export DEV_AUTH_BYPASS=true
+  export NEXT_PUBLIC_DEV_AUTH_BYPASS=true
   info "开发模式免登录已开启（仅当前开发进程）"
   # shellcheck disable=SC1091
   source .venv/bin/activate

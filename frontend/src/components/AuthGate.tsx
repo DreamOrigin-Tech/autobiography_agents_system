@@ -10,6 +10,13 @@ interface AuthGateProps {
 }
 
 export default function AuthGate({ children }: AuthGateProps) {
+  if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true") {
+    return <>{children}</>;
+  }
+  return <SessionAuthGate>{children}</SessionAuthGate>;
+}
+
+function SessionAuthGate({ children }: AuthGateProps) {
   const pathname = usePathname();
   const isPublicShare = pathname.startsWith("/share/");
   const [status, setStatus] = useState<"checking" | "authenticated" | "anonymous">(
