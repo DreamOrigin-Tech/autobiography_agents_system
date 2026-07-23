@@ -9,7 +9,7 @@ Orchestrator — coordinates Memory, Planning, Tools, and Reflection modules.
     ┌──────▼──────┐   ┌───────▼───────┐   ┌───────▼───────┐
     │   Memory    │   │   Planning    │   │  Reflection   │
     │  ─────────  │   │  ───────────  │   │  ───────────  │
-    │ ShortTerm   │   │ create_plan   │   │ before_write  │
+    │ ShortTerm   │   │ next_chapter  │   │ before_write  │
     │ LongTerm    │   │ suggest_next  │   │ after_write   │
     │ Semantic    │   │               │   │ cross_chapter  │
     └──────┬──────┘   └───────────────┘   └───────┬───────┘

@@ -15,7 +15,7 @@ export function ChapterSidebar({ projectId, chapters, activeChapterId }: Chapter
       <div className="sticky top-0 max-h-screen overflow-y-auto p-5">
         <div className="mb-5">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#98a2b3]">章节目录</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[#98a2b3]">已展开章节</p>
             <span className="text-xs font-medium text-[#667085]">{doneCount}/{chapters.length}</span>
           </div>
           <div className="mt-2 flex items-center gap-2">

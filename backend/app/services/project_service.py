@@ -1,10 +1,14 @@
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.planner import plan_outline, plan_outline_fallback, topics_to_text
+from app.agents.planning import (
+    create_next_chapter as generate_next_chapter,
+    create_next_chapter_fallback,
+    topics_to_text,
+)
 from app.models import Chapter, ChapterStatus, Project, ProjectStatus, User
 
 logger = logging.getLogger(__name__)
@@ -75,47 +79,76 @@ async def delete_project(db: AsyncSession, project: Project) -> None:
     await db.commit()
 
 
-async def plan_project_outline(
-    db: AsyncSession, project: Project, author_background: str
-) -> list[Chapter]:
-    used_fallback = False
+async def claim_chapter_generation(
+    db: AsyncSession, project_id: str, user_id: str
+) -> bool:
+    result = await db.execute(
+        update(Project)
+        .where(
+            Project.id == project_id,
+            Project.user_id == user_id,
+            Project.status != ProjectStatus.GENERATING,
+        )
+        .values(status=ProjectStatus.GENERATING)
+    )
+    await db.commit()
+    return result.rowcount == 1
+
+
+async def release_chapter_generation(
+    db: AsyncSession, project_id: str, user_id: str, previous_status: str
+) -> None:
+    await db.execute(
+        update(Project)
+        .where(
+            Project.id == project_id,
+            Project.user_id == user_id,
+            Project.status == ProjectStatus.GENERATING,
+        )
+        .values(status=previous_status)
+    )
+    await db.commit()
+
+
+async def create_next_project_chapter(
+    db: AsyncSession,
+    project: Project,
+    planning_context: str,
+    direction: str | None = None,
+) -> Chapter:
+    existing = sorted(project.chapters, key=lambda chapter: chapter.order)
+    next_order = max((chapter.order for chapter in existing), default=0) + 1
+    existing_context = [
+        {
+            "order": chapter.order,
+            "title": chapter.title,
+            "summary": chapter.summary or (chapter.content_md or "")[:500],
+        }
+        for chapter in existing
+    ]
+
     try:
-        outline = await plan_outline(project.title, author_background, project.style_notes)
-        if not outline.chapters:
-            logger.warning("LLM returned empty chapters for project=%s, using fallback", project.id)
-            outline = plan_outline_fallback(project.title)
-            used_fallback = True
+        item = await generate_next_chapter(
+            project.title,
+            planning_context,
+            existing_context,
+            direction,
+            project.style_notes,
+        )
     except Exception:
-        logger.exception("LLM plan failed for project=%s, using fallback", project.id)
-        outline = plan_outline_fallback(project.title)
-        used_fallback = True
+        logger.exception("Next chapter planning failed for project=%s, using fallback", project.id)
+        item = create_next_chapter_fallback(next_order, direction)
 
-    if used_fallback:
-        logger.warning(
-            "Project %s using hardcoded chapter outline (LLM unavailable or returned empty)",
-            project.id,
-        )
-
-    for existing in list(project.chapters):
-        await db.delete(existing)
-    await db.flush()
-
-    chapters: list[Chapter] = []
-    for item in outline.chapters:
-        chapter = Chapter(
-            project_id=project.id,
-            order=item.order,
-            title=item.title,
-            interview_topics=topics_to_text(item.interview_topics),
-            status=ChapterStatus.PENDING,
-        )
-        db.add(chapter)
-        chapters.append(chapter)
+    chapter = Chapter(
+        project_id=project.id,
+        order=next_order,
+        title=item.title,
+        interview_topics=topics_to_text(item.interview_topics),
+        status=ChapterStatus.PENDING,
+    )
+    db.add(chapter)
 
     project.status = ProjectStatus.INTERVIEWING
     await db.commit()
-
-    result = await db.execute(
-        select(Chapter).where(Chapter.project_id == project.id).order_by(Chapter.order)
-    )
-    return list(result.scalars().all())
+    await db.refresh(chapter)
+    return chapter

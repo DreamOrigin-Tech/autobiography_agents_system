@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class ProjectStatusSchema(StrEnum):
     PLANNING = "planning"
+    GENERATING = "generating"
     INTERVIEWING = "interviewing"
     WRITING = "writing"
     REVIEWING = "reviewing"
@@ -142,6 +143,27 @@ class PlanRequest(BaseModel):
     )
 
 
+class OutlineInterviewMessage(BaseModel):
+    role: str
+    content: str
+
+
+class OutlineInterviewState(BaseModel):
+    messages: list[OutlineInterviewMessage]
+    ready: bool
+    answer_count: int
+    min_answers: int
+    can_generate: bool
+
+
+class OutlineInterviewAnswerRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class NextChapterRequest(BaseModel):
+    direction: str = Field(min_length=1, max_length=2000)
+
+
 class InterviewAnswerRequest(BaseModel):
     content: str = Field(min_length=1)
 
@@ -227,7 +249,3 @@ class OutlineChapterPlan(BaseModel):
     order: int
     title: str
     interview_topics: list[str]
-
-
-class OutlinePlanResult(BaseModel):
-    chapters: list[OutlineChapterPlan]

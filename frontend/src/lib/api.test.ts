@@ -31,6 +31,6 @@ test("API timeouts use a clear retryable message", async () => {
   assert.equal(typeof requestFailureMessage, "function");
   assert.equal(
     requestFailureMessage({ name: "AbortError" }),
-    "连接服务超时，请检查访问地址后重试",
+    "服务响应超时，请稍后重试",
   );
 });

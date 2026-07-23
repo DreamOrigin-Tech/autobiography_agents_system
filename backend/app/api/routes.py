@@ -23,7 +23,7 @@ from app.auth import (
 )
 from app.config import settings
 from app.db.session import get_db
-from app.models import Revision, User
+from app.models import ChapterStatus, Revision, User
 from app.rate_limit import rate_limit_llm
 from app.schemas import (
     AuthProvidersResponse,
@@ -38,6 +38,9 @@ from app.schemas import (
     InterviewMessageSchema,
     LoginRequest,
     LoginResponse,
+    NextChapterRequest,
+    OutlineInterviewAnswerRequest,
+    OutlineInterviewState,
     PlanRequest,
     ProjectCreate,
     ProjectDetail,
@@ -48,7 +51,13 @@ from app.schemas import (
     RevisionSchema,
     WriteReadinessResponse,
 )
-from app.services import chapter_service, interview_service, project_service, publish_service
+from app.services import (
+    chapter_service,
+    interview_service,
+    outline_interview_service,
+    project_service,
+    publish_service,
+)
 from app.services import wechat_auth
 from app.services.patch import unified_diff
 
@@ -273,9 +282,104 @@ async def plan_project(
     project = await project_service.get_project(db, project_id, current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
-    await project_service.plan_project_outline(db, project, body.author_background)
-    logger.info("Plan project %s — done, chapters=%d", project_id, len(project.chapters))
+    if project.chapters:
+        return project
+    planning_context = outline_interview_service.planning_context(project)
+    author_background = body.author_background.strip() or planning_context
+    if not author_background:
+        raise HTTPException(status_code=400, detail="请先完成几轮人生梳理采访")
+    previous_status = project.status
+    claimed = await project_service.claim_chapter_generation(db, project_id, current_user.id)
+    if not claimed:
+        raise HTTPException(status_code=409, detail="第一章正在确定，请稍候")
+    project = await project_service.get_project(db, project_id, current_user.id)
+    try:
+        await project_service.create_next_project_chapter(
+            db,
+            project,
+            author_background,
+        )
+    except BaseException:
+        await db.rollback()
+        await project_service.release_chapter_generation(
+            db, project_id, current_user.id, previous_status
+        )
+        raise
+    logger.info("Plan first chapter for project %s — done", project_id)
     return await project_service.get_project(db, project_id, current_user.id)
+
+
+@router.post("/projects/{project_id}/chapters/next", response_model=ProjectDetail)
+async def create_next_chapter(
+    project_id: str,
+    body: NextChapterRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if not project.chapters:
+        raise HTTPException(status_code=409, detail="请先完成人生梳理采访并开始第一章")
+    if any(chapter.status != ChapterStatus.DONE for chapter in project.chapters):
+        raise HTTPException(status_code=409, detail="请先完成当前章节，再确定下一章")
+
+    previous_status = project.status
+    claimed = await project_service.claim_chapter_generation(db, project_id, current_user.id)
+    if not claimed:
+        raise HTTPException(status_code=409, detail="下一章正在整理，请稍候")
+    project = await project_service.get_project(db, project_id, current_user.id)
+    try:
+        await project_service.create_next_project_chapter(
+            db,
+            project,
+            outline_interview_service.planning_context(project),
+            body.direction,
+        )
+    except BaseException:
+        await db.rollback()
+        await project_service.release_chapter_generation(
+            db, project_id, current_user.id, previous_status
+        )
+        raise
+    return await project_service.get_project(db, project_id, current_user.id)
+
+
+@router.post(
+    "/projects/{project_id}/outline-interview/start",
+    response_model=OutlineInterviewState,
+)
+async def start_outline_interview(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return await outline_interview_service.start(db, project)
+
+
+@router.post(
+    "/projects/{project_id}/outline-interview/answer",
+    response_model=OutlineInterviewState,
+)
+async def answer_outline_interview(
+    project_id: str,
+    body: OutlineInterviewAnswerRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    if project.chapters:
+        raise HTTPException(status_code=409, detail="第一章已经开始")
+    return await outline_interview_service.answer(db, project, body.content)
 
 
 @router.get("/projects/{project_id}/chapters")

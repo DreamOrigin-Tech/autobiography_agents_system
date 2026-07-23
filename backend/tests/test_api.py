@@ -1,11 +1,13 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 
 from app.db.session import async_session
 from app.db.session import init_db
 from app.main import app
-from app.models import InterviewSession
-from app.services import interview_service
+from app.models import Chapter, ChapterStatus, InterviewSession, Project, ProjectStatus
+from app.schemas import OutlineChapterPlan
+from app.services import interview_service, outline_interview_service, project_service
 from conftest import login_test_user
 
 
@@ -40,7 +42,25 @@ async def test_dev_cors_allows_auto_selected_localhost_ports():
 
 
 @pytest.mark.asyncio
-async def test_create_and_plan_project():
+async def test_create_and_plan_project(monkeypatch):
+    async def fake_next_turn(_title, messages):
+        answer_count = sum(1 for message in messages if message["role"] == "user")
+        return {
+            "reply": "这些内容已经可以整理章节了。" if answer_count >= 3 else "再聊一个重要的人生转折？",
+            "ready": answer_count >= 3,
+            "reason": "test",
+        }
+
+    async def fake_next_chapter(_title, _context, existing, direction, _style):
+        order = len(existing) + 1
+        return OutlineChapterPlan(
+            order=order,
+            title="北方小城的童年" if order == 1 else "三十岁的职业转弯",
+            interview_topics=[direction or "成长环境", "重要人物", "一个具体画面"],
+        )
+
+    monkeypatch.setattr(outline_interview_service, "generate_next_turn", fake_next_turn)
+    monkeypatch.setattr(project_service, "generate_next_chapter", fake_next_chapter)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await login_test_user(client)
@@ -49,13 +69,67 @@ async def test_create_and_plan_project():
         project = create_res.json()
         project_id = project["id"]
 
-        plan_res = await client.post(
-            f"/api/projects/{project_id}/plan",
-            json={"author_background": "测试作者"},
-        )
+        start_res = await client.post(f"/api/projects/{project_id}/outline-interview/start")
+        assert start_res.status_code == 200
+        assert start_res.json()["answer_count"] == 0
+
+        for answer in ("我在北方小城长大。", "三十岁时换了职业。", "母亲对我影响最大。"):
+            answer_res = await client.post(
+                f"/api/projects/{project_id}/outline-interview/answer",
+                json={"content": answer},
+            )
+            assert answer_res.status_code == 200
+
+        interview = answer_res.json()
+        assert interview["ready"] is True
+        assert interview["answer_count"] == 3
+        assert interview["can_generate"] is True
+
+        resumed = await client.post(f"/api/projects/{project_id}/outline-interview/start")
+        assert resumed.json()["messages"] == interview["messages"]
+
+        plan_res = await client.post(f"/api/projects/{project_id}/plan", json={})
         assert plan_res.status_code == 200
         planned = plan_res.json()
-        assert len(planned["chapters"]) >= 5
+        assert len(planned["chapters"]) == 1
+        assert planned["chapters"][0]["title"] == "北方小城的童年"
+
+        repeat_res = await client.post(
+            f"/api/projects/{project_id}/plan",
+            json={"author_background": "重复提交不应再次生成"},
+        )
+        assert repeat_res.status_code == 200
+        assert [chapter["id"] for chapter in repeat_res.json()["chapters"]] == [
+            chapter["id"] for chapter in planned["chapters"]
+        ]
+
+        blocked_next = await client.post(
+            f"/api/projects/{project_id}/chapters/next",
+            json={"direction": "三十岁换职业的经历"},
+        )
+        assert blocked_next.status_code == 409
+
+        async with async_session() as db:
+            chapter = (
+                await db.execute(select(Chapter).where(Chapter.project_id == project_id))
+            ).scalar_one()
+            project_model = (
+                await db.execute(select(Project).where(Project.id == project_id))
+            ).scalar_one()
+            chapter.status = ChapterStatus.DONE
+            chapter.summary = "我在北方小城长大，三十岁时决定换职业。"
+            project_model.status = ProjectStatus.REVIEWING
+            await db.commit()
+
+        next_res = await client.post(
+            f"/api/projects/{project_id}/chapters/next",
+            json={"direction": "三十岁换职业的经历"},
+        )
+        assert next_res.status_code == 200
+        assert [chapter["title"] for chapter in next_res.json()["chapters"]] == [
+            "北方小城的童年",
+            "三十岁的职业转弯",
+        ]
 
         get_res = await client.get(f"/api/projects/{project_id}")
         assert get_res.status_code == 200

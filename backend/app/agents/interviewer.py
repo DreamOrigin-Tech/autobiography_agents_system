@@ -17,7 +17,7 @@ INTERVIEWER_SYSTEM = """你是一位善于倾听的自传采访记者。你不�
 4. 语言口语化、温和、简短。少用“能否补充”“请详细描述”“关于……能跟我多讲讲吗”等采访模板。
 5. 作者说记不清时，允许模糊记忆，用轻松的联想线索帮助回想；作者不想说时，明确接受并换一个角度，不施压。
 6. 不重复已经问过的问题。每 2-3 轮可以自然过渡到另一个话题，但要有一句衔接。
-7. 第一个问题要容易回答，从一个画面、一个人、一件小事或一句话切入。
+7. 第一次见面时，先用 1-2 句自然寒暄，让作者知道可以慢慢说、记不清也没关系，再从一个画面、一个人或一件小事轻轻切入。后续章节承接前文，不要重复正式问候。
 8. 后台的“完成度、缺失维度、覆盖度”等只用于你选择方向，绝不能在回复里提到这些词。
 9. 当素材已经足够撰写时，可以自然收束，例如“这段故事已经很清楚了，我们可以先把它写下来”。
 
@@ -39,6 +39,14 @@ async def generate_question(
     preference_context: str | None = None,
     coverage_context: str | None = None,
 ) -> dict:
+    if not messages:
+        return {
+            "question": _opening_question(chapter_title, chapter_summaries),
+            "intent": "建立关系",
+            "suggested_action": "continue",
+            "reason": "用轻松开场降低回答压力，再从具体画面进入回忆",
+        }
+
     role_labels = {"agent": "记者", "user": "作者"}
     history_text = "\n".join(
         f"{role_labels.get(m['role'], m['role'])}：{m['content']}"
@@ -120,6 +128,20 @@ def _natural_fallback_question(
     if topic and topic != "这一章中您最想分享的故事":
         return f"我们先从「{topic}」慢慢聊起。现在回想起来，您脑海里最先浮现的是哪一幕？"
     return f"说到「{chapter_title}」，您脑海里最先浮现的是哪个人，或哪一幕？"
+
+
+def _opening_question(chapter_title: str, chapter_summaries: list[str]) -> str:
+    spoken_title = re.split(r"[：:—–]", chapter_title, maxsplit=1)[0].strip() or chapter_title
+    if chapter_summaries:
+        return (
+            "我们接着慢慢往下聊，不用急着一次把事情讲完整。"
+            f"说到{spoken_title}，您最先想起的是哪个人，或者哪一个小画面？"
+        )
+    return (
+        "您好，咱们今天就像聊家常一样，慢慢来。"
+        "想起多少说多少，记不清也没关系。"
+        f"说到{spoken_title}，您最先想到的是谁，或者哪个小画面？"
+    )
 
 
 def _normalize_interview_turn(text: str, fallback: str) -> str:

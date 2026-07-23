@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 class ProjectStatus(StrEnum):
     PLANNING = "planning"
+    GENERATING = "generating"
     INTERVIEWING = "interviewing"
     WRITING = "writing"
     REVIEWING = "reviewing"
@@ -35,6 +36,7 @@ class Project(Base):
     style_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     preference_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     memory_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    planning_interview_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     share_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

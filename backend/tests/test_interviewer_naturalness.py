@@ -3,6 +3,30 @@ import pytest
 from app.agents import interviewer
 
 
+def test_first_interview_opening_eases_into_the_topic():
+    question = interviewer._opening_question("票证年代的童年光影", [])
+
+    assert "聊家常" in question
+    assert "记不清也没关系" in question
+    assert "票证年代的童年光影" in question
+    assert question.count("？") == 1
+
+
+def test_opening_shortens_a_written_chapter_title_for_conversation():
+    question = interviewer._opening_question("大院里的童年：票证、样板戏和露天电影", [])
+
+    assert "说到大院里的童年" in question
+    assert "票证、样板戏和露天电影" not in question
+
+
+def test_later_chapter_opening_continues_without_repeating_greeting():
+    question = interviewer._opening_question("第一次参加工作", ["童年生活摘要"])
+
+    assert "接着" in question
+    assert "正式采访" not in question
+    assert question.count("？") == 1
+
+
 def test_natural_fallback_follows_the_last_answer_and_asks_one_question():
     question = interviewer._natural_fallback_question(
         "童年",

@@ -1,5 +1,6 @@
 export type ProjectStatus =
   | "planning"
+  | "generating"
   | "interviewing"
   | "writing"
   | "reviewing"
@@ -38,6 +39,19 @@ export interface ProjectDetail extends ProjectBrief {
   share_token?: string | null;
   published_at?: string | null;
   chapters: ChapterBrief[];
+}
+
+export interface OutlineInterviewMessage {
+  role: "agent" | "user";
+  content: string;
+}
+
+export interface OutlineInterviewState {
+  messages: OutlineInterviewMessage[];
+  ready: boolean;
+  answer_count: number;
+  min_answers: number;
+  can_generate: boolean;
 }
 
 export interface AuthUser {

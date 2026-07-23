@@ -127,8 +127,15 @@ export type SpeechSynthesisUtteranceConstructor = new (
   text: string,
 ) => SpeechSynthesisUtteranceLike;
 
+export interface SpeechVoiceLike {
+  name?: string;
+  lang?: string;
+  localService?: boolean;
+  default?: boolean;
+}
+
 export interface SpeechSynthesisLike {
-  getVoices: () => Array<{ lang?: string }>;
+  getVoices: () => SpeechVoiceLike[];
   speak: (utterance: SpeechSynthesisUtteranceLike) => void;
   cancel: () => void;
 }
@@ -214,26 +221,82 @@ export function voiceErrorMessage(code: string): string {
   }
 }
 
-export function speakChinese(
+export async function speakChinese(
   text: string,
   environment?: VoiceEnvironment,
 ): Promise<void> {
   const target = (environment ?? (typeof window !== "undefined" ? window : {})) as VoiceEnvironment;
   const synthesis = target.speechSynthesis;
   const Utterance = target.SpeechSynthesisUtterance;
-  if (!synthesis || !Utterance || !text.trim()) return Promise.resolve();
+  if (!synthesis || !Utterance || !text.trim()) return;
 
+  let voices = synthesis.getVoices();
+  if (voices.length === 0) {
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 250));
+    voices = synthesis.getVoices();
+  }
+  const voice = selectChineseVoice(voices);
+  const segments = prepareSpeechSegments(text);
+  synthesis.cancel();
+
+  for (const segment of segments) {
+    await speakSegment(segment, synthesis, Utterance, voice);
+  }
+}
+
+export function selectChineseVoice(voices: SpeechVoiceLike[]): SpeechVoiceLike | undefined {
+  return voices
+    .map((voice, index) => ({ voice, index, score: chineseVoiceScore(voice) }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.voice;
+}
+
+export function prepareSpeechSegments(text: string): string[] {
+  const spoken = text
+    .trim()
+    .replace(/[「」『』“”]/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/[：:]/g, "，");
+  return spoken
+    .split(/(?<=[。！？!?])/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function chineseVoiceScore(voice: SpeechVoiceLike): number {
+  const lang = (voice.lang || "").toLowerCase().replace(/_/g, "-");
+  const name = (voice.name || "").toLowerCase();
+  let score = 0;
+
+  if (lang === "zh-cn" || lang === "cmn-hans-cn") score += 100;
+  else if (lang.startsWith("zh-hans")) score += 90;
+  else if (lang === "zh-tw" || lang.startsWith("zh-hant-tw")) score += 45;
+  else if (lang === "zh-hk" || lang.startsWith("yue")) score += 20;
+  else if (lang.startsWith("zh") || lang.startsWith("cmn")) score += 55;
+  else return 0;
+
+  if (/natural|neural|premium|enhanced/.test(name)) score += 35;
+  if (/xiaoxiao|xiaoyi|yunxi|yunyang|tingting|ting-ting|google.*(普通话|mandarin)/.test(name)) score += 25;
+  if (/cantonese|粤语|廣東話/.test(name)) score -= 50;
+  if (voice.localService) score += 3;
+  if (voice.default) score += 1;
+  return score;
+}
+
+function speakSegment(
+  segment: string,
+  synthesis: SpeechSynthesisLike,
+  Utterance: SpeechSynthesisUtteranceConstructor,
+  voice?: SpeechVoiceLike,
+): Promise<void> {
   return new Promise((resolve) => {
-    const utterance = new Utterance(text.trim());
+    const utterance = new Utterance(segment);
     utterance.lang = "zh-CN";
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
+    utterance.rate = 0.88;
+    utterance.pitch = 0.97;
     utterance.volume = 1;
-    const chineseVoice = synthesis
-      .getVoices()
-      .find((voice) => voice.lang?.toLowerCase().startsWith("zh"));
-    if (chineseVoice) utterance.voice = chineseVoice;
-    utterance.onend = () => resolve();
+    if (voice) utterance.voice = voice;
+    utterance.onend = () => globalThis.setTimeout(resolve, 120);
     utterance.onerror = () => resolve();
     synthesis.speak(utterance);
   });

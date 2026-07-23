@@ -5,6 +5,7 @@ import type {
   EditPreview,
   InterviewMessage,
   InterviewResult,
+  OutlineInterviewState,
   ProjectDetail,
   PublishedProject,
   PublishReadiness,
@@ -16,8 +17,13 @@ import type {
 } from "./types";
 
 const TOKEN_KEY = "auth_token";
-const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+const AI_REQUEST_TIMEOUT_MS = 180_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+type RequestOptions = RequestInit & {
+  timeoutMs?: number;
+};
 
 export function resolveApiBase(
   configuredUrl: string | undefined,
@@ -54,7 +60,7 @@ export function requestFailureMessage(error: unknown): string {
     "name" in error &&
     error.name === "AbortError"
   ) {
-    return "连接服务超时，请检查访问地址后重试";
+    return "服务响应超时，请稍后重试";
   }
   if (error instanceof TypeError) {
     return "无法连接服务，请检查访问地址后重试";
@@ -105,8 +111,9 @@ async function parseError(res: Response): Promise<string> {
 
 // ── Request helper ──────────────────────────────────
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const method = options?.method || "GET";
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options || {};
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -119,11 +126,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   apiLog(method, path, "→");
   const start = performance.now();
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${getApiBase()}${path}`, {
-      ...options,
+      ...fetchOptions,
       headers,
       credentials: "include",
       signal: controller.signal,
@@ -202,10 +209,30 @@ export const api = {
   deleteProject: (id: string) =>
     request<void>(`/projects/${id}`, { method: "DELETE" }),
 
-  planProject: (id: string, authorBackground: string) =>
+  startOutlineInterview: (id: string) =>
+    request<OutlineInterviewState>(`/projects/${id}/outline-interview/start`, {
+      method: "POST",
+    }),
+
+  answerOutlineInterview: (id: string, content: string) =>
+    request<OutlineInterviewState>(`/projects/${id}/outline-interview/answer`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
+
+  startFirstChapter: (id: string, planningContext = "") =>
     request<ProjectDetail>(`/projects/${id}/plan`, {
       method: "POST",
-      body: JSON.stringify({ author_background: authorBackground }),
+      body: JSON.stringify({ author_background: planningContext }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
+
+  createNextChapter: (id: string, direction: string) =>
+    request<ProjectDetail>(`/projects/${id}/chapters/next`, {
+      method: "POST",
+      body: JSON.stringify({ direction }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
   // Chapters
@@ -221,6 +248,7 @@ export const api = {
   startInterview: (chapterId: string) =>
     request<InterviewResult>(`/chapters/${chapterId}/interview/start`, {
       method: "POST",
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
   getInterviewMessages: (chapterId: string) =>
@@ -230,6 +258,7 @@ export const api = {
     request<InterviewResult>(`/chapters/${chapterId}/interview/answer`, {
       method: "POST",
       body: JSON.stringify({ content }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
   // Writing
@@ -243,13 +272,17 @@ export const api = {
     request<ChapterQuality>(`/chapters/${chapterId}/quality`),
 
   writeChapter: (chapterId: string) =>
-    request<ChapterDetail>(`/chapters/${chapterId}/write`, { method: "POST" }),
+    request<ChapterDetail>(`/chapters/${chapterId}/write`, {
+      method: "POST",
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
 
   // Editing
   previewEdit: (chapterId: string, instruction: string) =>
     request<EditPreview>(`/chapters/${chapterId}/edit`, {
       method: "POST",
       body: JSON.stringify({ instruction }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
   applyEdit: (chapterId: string, revisionId: string) =>
@@ -355,6 +388,7 @@ export function streamWriteChapter(
 
 export const statusLabels: Record<string, string> = {
   planning: "规划中",
+  generating: "正在生成大纲",
   interviewing: "采访中",
   writing: "写作中",
   reviewing: "审阅中",

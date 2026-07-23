@@ -71,6 +71,7 @@ def _migrate_schema(connection) -> None:
     _add_column_if_missing(connection, "projects", "timeline_json", "TEXT", proj_cols)
     _add_column_if_missing(connection, "projects", "preference_notes", "TEXT", proj_cols)
     _add_column_if_missing(connection, "projects", "memory_notes", "TEXT", proj_cols)
+    _add_column_if_missing(connection, "projects", "planning_interview_json", "TEXT", proj_cols)
 
     # ── chapters table ──
     ch_cols = {

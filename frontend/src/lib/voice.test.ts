@@ -3,9 +3,26 @@ import test from "node:test";
 
 import {
   initialVoiceState,
+  prepareSpeechSegments,
+  selectChineseVoice,
   voiceErrorMessage,
   voiceReducer,
 } from "./voice.ts";
+
+test("voice selection prefers a natural mainland Mandarin voice", () => {
+  const cantonese = { name: "Sin-Ji", lang: "zh-HK", localService: true };
+  const mandarin = { name: "Microsoft Xiaoxiao Online (Natural)", lang: "zh-CN" };
+  const fallback = { name: "Generic Chinese", lang: "zh" };
+
+  assert.equal(selectChineseVoice([cantonese, fallback, mandarin]), mandarin);
+});
+
+test("speech text removes written quotation marks and pauses by sentence", () => {
+  assert.deepEqual(
+    prepareSpeechSegments("说到「大院里的童年：票证和电影」，慢慢想。记不清也没关系。"),
+    ["说到大院里的童年，票证和电影，慢慢想。", "记不清也没关系。"],
+  );
+});
 
 test("voice conversation moves from prompt to listening to submission and back", () => {
   const started = voiceReducer(initialVoiceState, { type: "start", hasPrompt: true });

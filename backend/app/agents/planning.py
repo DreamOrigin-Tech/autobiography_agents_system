@@ -1,95 +1,80 @@
-"""
-Planning Module — outline creation + dynamic adjustment.
-
-Architecture role:
-  create_plan()      — initial chapter outline from author background
-  adjust_plan()      — suggest adding / splitting / merging chapters
-  suggest_next_action() — given project state, recommend what to do next
-"""
+"""Planning helpers for gradual, one-chapter-at-a-time autobiography discovery."""
 
 import json
 
-from app.schemas import OutlineChapterPlan, OutlinePlanResult
+from app.schemas import OutlineChapterPlan
 from app.services.llm import llm_complete_json
 
-PLANNER_SYSTEM = """你是一位专业的自传策划编辑。你的核心任务是根据作者提供的个人背景，为其量身定制独一无二的章节大纲。
+NEXT_CHAPTER_SYSTEM = """你是一位自传策划编辑。请根据作者已经讲过的内容，一次只确定下一章，不要规划整本书，也不要预告后续章节。
 
-关键要求：
-- 章节标题和采访话题必须紧扣作者背景中的具体经历、职业、年龄段
-- 如果作者提到具体职业（如教师、医生、工程师），章节应体现其职业特点
-- 如果作者提到特定年代经历（如文革、改革开放），应作为章节背景
-- 如果作者提到特定地域（如东北、上海、农村），应融入地域特色
-- 严禁生成泛泛的通用章节（如"童年记忆""求学之路""人生感悟"）
-- 每章的 interview_topics 应该是针对该作者才会被问到的问题
-
-输出 JSON 格式：
-{
-  "chapters": [
-    {
-      "order": 1,
-      "title": "具体的、个性化的章节标题",
-      "interview_topics": ["针对该作者的具体问题1", "具体问题2", "具体问题3"]
-    }
-  ]
-}
 要求：
-- 章节 5-8 个，按时间或主题递进
-- 每章 3-5 个采访话题
-- 使用中文
+- 第一章选择作者最容易进入、最有具体记忆的起点，不必强求从出生写起
+- 后续章节要承接已完成内容，但不能重复已有章节
+- 用户明确说想聊哪个时期、人物或事件时，优先遵从这个方向
+- 标题必须具体，能看出属于这位作者，禁止使用“童年记忆”“人生感悟”等通用标题
+- 提供 3-5 个适合下一轮采访的具体话题
+
+输出 JSON：
+{
+  "order": 1,
+  "title": "下一章的具体标题",
+  "interview_topics": ["具体话题1", "具体话题2", "具体话题3"]
+}
 """
 
-async def create_plan(title: str, author_background: str, style_notes: str | None) -> OutlinePlanResult:
-    """Generate initial chapter outline."""
-    user_content = f"""自传标题：{title}
 
-【作者背景】
-{author_background or '未提供'}
-
-【风格偏好】
-{style_notes or '真实、温情、第一人称'}
-
-请严格依据上述作者背景，为这位作者规划专属的章节大纲。每一章的标题和采访话题都应能看出是基于该作者的具体经历。"""
-
+async def create_next_chapter(
+    title: str,
+    planning_context: str,
+    existing_chapters: list[dict],
+    direction: str | None,
+    style_notes: str | None,
+) -> OutlineChapterPlan:
+    next_order = len(existing_chapters) + 1
+    existing_text = "\n".join(
+        f"- 第 {chapter['order']} 章《{chapter['title']}》：{chapter.get('summary') or '暂无摘要'}"
+        for chapter in existing_chapters
+    )
     data = await llm_complete_json(
         [
-            {"role": "system", "content": PLANNER_SYSTEM},
-            {"role": "user", "content": user_content},
+            {"role": "system", "content": NEXT_CHAPTER_SYSTEM},
+            {
+                "role": "user",
+                "content": f"""自传标题：{title}
+
+最初的人生梳理采访：
+{planning_context or '（暂无）'}
+
+已经完成的章节：
+{existing_text or '（这是第一章）'}
+
+作者希望下一章聊：
+{direction or '（请从已有采访中选择最自然的起点）'}
+
+写作风格：
+{style_notes or '真实、温情、第一人称'}
+
+请只确定第 {next_order} 章。""",
+            },
         ],
         temperature=0.7,
     )
-    return OutlinePlanResult.model_validate(data)
+    data["order"] = next_order
+    return OutlineChapterPlan.model_validate(data)
 
 
-def create_plan_fallback(title: str) -> OutlinePlanResult:
-    """Hardcoded fallback outline when LLM is unavailable."""
-    _ = title
-    return OutlinePlanResult(
-        chapters=[
-            OutlineChapterPlan(
-                order=1, title="童年记忆",
-                interview_topics=["最早的记忆", "家庭环境", "童年玩伴", "影响最深的人"],
-            ),
-            OutlineChapterPlan(
-                order=2, title="求学之路",
-                interview_topics=["求学经历", "重要老师", "转折点", "青春梦想"],
-            ),
-            OutlineChapterPlan(
-                order=3, title="初入社会",
-                interview_topics=["第一份工作", "遇到的困难", "成长收获", "重要决定"],
-            ),
-            OutlineChapterPlan(
-                order=4, title="事业篇章",
-                interview_topics=["职业高光", "失败与挫折", "关键人物", "成就与遗憾"],
-            ),
-            OutlineChapterPlan(
-                order=5, title="家庭与情感",
-                interview_topics=["爱情故事", "亲子关系", "家庭变化", "情感感悟"],
-            ),
-            OutlineChapterPlan(
-                order=6, title="人生感悟",
-                interview_topics=["价值观", "给后辈的话", "未完成的梦", "最想留下的话"],
-            ),
-        ]
+def create_next_chapter_fallback(order: int, direction: str | None = None) -> OutlineChapterPlan:
+    focus = (direction or "一段最想留下的人生经历").strip()
+    title = focus[:24] if direction else ("故事从这里开始" if order == 1 else "接着往前走")
+    return OutlineChapterPlan(
+        order=order,
+        title=title,
+        interview_topics=[
+            f"{focus}发生在什么时候、什么地方",
+            f"{focus}里最重要的人",
+            f"{focus}中印象最深的一个画面",
+            f"{focus}对后来的影响",
+        ],
     )
 
 
@@ -106,14 +91,14 @@ async def suggest_next_action(
     if project_status == "planning" and pending == len(chapters_status):
         return {
             "action": "start_interview",
-            "message": "大纲已生成，选择一个章节开始采访吧",
+            "message": "第一章已确定，先从这里开始采访吧",
             "priority": "high",
         }
 
     if pending > 0 and interviewing == 0 and drafting == 0:
         return {
             "action": "start_interview",
-            "message": f"还有 {pending} 个章节待采访，继续推进",
+            "message": f"还有 {pending} 个已确定章节待采访，继续推进",
             "priority": "high",
         }
 
