@@ -243,10 +243,12 @@ start_docker() {
   ensure_backend_env
   cd "$ROOT_DIR"
   export DEV_AUTH_BYPASS=true
+  export NEXT_ALLOWED_DEV_ORIGINS="${NEXT_ALLOWED_DEV_ORIGINS:-${DOMAIN}}"
   export BACKEND_PIP_INDEX_URL BACKEND_PIP_TRUSTED_HOST
 
   info "构建并启动 Docker 容器（本地开发模式）..."
   info "开发模式免登录已开启（Docker）"
+  info "Next.js dev 允许访问域名: ${NEXT_ALLOWED_DEV_ORIGINS}"
   info "后端 pip 依赖源: ${BACKEND_PIP_INDEX_URL}"
   warn "公网服务器请使用: ./start.sh prod"
   docker_compose up --build -d
@@ -307,6 +309,7 @@ start_dev() {
   cd "$BACKEND_DIR"
   export DEV_AUTH_BYPASS=true
   export NEXT_PUBLIC_DEV_AUTH_BYPASS=true
+  export NEXT_ALLOWED_DEV_ORIGINS="${NEXT_ALLOWED_DEV_ORIGINS:-${DOMAIN}}"
   info "开发模式免登录已开启（仅当前开发进程）"
   # shellcheck disable=SC1091
   source .venv/bin/activate
@@ -315,6 +318,7 @@ start_dev() {
   BACKEND_PID=$!
 
   info "启动前端 (port ${FRONTEND_PORT})..."
+  info "Next.js dev 允许访问域名: ${NEXT_ALLOWED_DEV_ORIGINS}"
   cd "$FRONTEND_DIR"
   nohup npm run dev -- -p "$FRONTEND_PORT" \
     </dev/null > "$ROOT_DIR/.frontend.log" 2>&1 &
