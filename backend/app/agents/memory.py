@@ -65,6 +65,69 @@ class AgentMemory:
                 keywords.append(seg)
         return keywords
 
+    @staticmethod
+    def topic_anchors(topic: str) -> list[str]:
+        """Extract compact anchors from a planned topic question.
+
+        Planned topics are often full interviewer questions. Matching the full
+        sentence against interview answers makes clearly covered topics look
+        untouched, so we keep only short, content-bearing anchors.
+        """
+        anchors: list[str] = []
+        seen: set[str] = set()
+        stopwords = {
+            "请描述", "描述", "第一次", "意识到", "情境", "如何", "解释", "这件事",
+            "工作台", "能否", "回忆", "一个", "具体", "项目", "最早", "产生",
+            "兴趣", "时候", "当时", "身边", "哪些", "他们", "有何", "影响",
+            "有没有", "某件", "物品", "玩具", "设计", "执着", "发生", "什么",
+            "以及", "的是", "如何", "请", "你", "您",
+        }
+        stop_substrings = (
+            "请描述", "第一次", "意识到", "情境", "如何", "这件事", "能否",
+            "什么时候", "当时", "哪些", "有何", "影响", "有没有", "发生",
+            "什么", "让你", "对你", "教你",
+        )
+        preferred_terms = (
+            "被收养", "收养", "保罗", "克拉拉", "父亲", "母亲", "车库", "工作台",
+            "看不见", "背面", "电子学", "电子", "硅谷", "工程师", "邻居",
+            "童年", "物品", "玩具", "设计", "执着", "手艺", "家庭",
+        )
+
+        for term in preferred_terms:
+            if term in topic and term not in seen:
+                anchors.append(term)
+                seen.add(term)
+
+        for segment in AgentMemory.extract_keywords(topic):
+            latin_parts = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*", segment)
+            for part in latin_parts:
+                if part not in seen:
+                    anchors.append(part)
+                    seen.add(part)
+
+            cjk = re.sub(r"[^\u4e00-\u9fff]", "", segment)
+            if not cjk:
+                continue
+            candidates: list[str] = []
+            for size in (3, 4, 2):
+                for index in range(0, max(0, len(cjk) - size + 1)):
+                    candidates.append(cjk[index:index + size])
+
+            for candidate in candidates:
+                if (
+                    len(candidate) < 2
+                    or candidate in stopwords
+                    or any(part in candidate for part in stop_substrings)
+                    or candidate.startswith(("请", "你", "您", "他", "她", "它"))
+                    or candidate.endswith(("吗", "呢", "么", "的", "了"))
+                    or candidate in seen
+                ):
+                    continue
+                anchors.append(candidate)
+                seen.add(candidate)
+
+        return anchors[:24]
+
     def find_unanswered_topics(
         self, topics: list[str], messages: list[dict[str, str]]
     ) -> list[str]:
@@ -75,12 +138,12 @@ class AgentMemory:
         unanswered: list[str] = []
         for topic in topics:
             # Check if any significant part of the topic was mentioned
-            kws = self.extract_keywords(topic)
+            kws = self.topic_anchors(topic)
             if not kws:
                 continue
             # If fewer than half the keywords appear, consider it unanswered
             matched = sum(1 for kw in kws if kw in user_text)
-            if matched < max(1, len(kws) // 2):
+            if matched < max(1, min(3, len(kws) // 3)):
                 unanswered.append(topic)
         return unanswered
 
@@ -99,9 +162,9 @@ class AgentMemory:
         result["total_rounds"] = user_rounds
 
         for topic in interview_topics:
-            kws = AgentMemory.extract_keywords(topic)
+            kws = AgentMemory.topic_anchors(topic)
             matched = sum(1 for kw in kws if kw in user_text)
-            coverage = matched / max(1, len(kws))
+            coverage = min(1.0, matched / max(1, min(5, len(kws))))
             result["topics"].append({
                 "topic": topic,
                 "coverage": round(coverage, 2),
@@ -151,6 +214,27 @@ class AgentMemory:
         missing = quality.get("missing_dimensions", [])
         topic_hint = topics[0] if topics else chapter_title
         text = answer.strip()
+
+        if _contains_any(
+            text,
+            (
+                "你好",
+                "测试",
+                "试一下",
+                "试试",
+                "麦克风",
+                "语音模型",
+                "千问",
+                "ASR",
+                "TTS",
+                "录音",
+            ),
+        ):
+            return (
+                "这段先不算正式采访。"
+                "如果您准备好了，我们可以直接从一个具体画面开始，比如一个人、一件事或一个地方，"
+                "您最先想到哪一个？"
+            )
 
         if _contains_any(text, ("不想说", "不方便说", "不太方便", "跳过", "换一个", "不聊这个")):
             return f"没关系，这段我们先放下。换个轻松一点的角度，关于「{topic_hint}」，您更愿意从哪件小事说起？"

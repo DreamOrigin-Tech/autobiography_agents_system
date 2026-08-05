@@ -38,6 +38,15 @@ def test_natural_fallback_follows_the_last_answer_and_asks_one_question():
     assert question.count("？") == 1
 
 
+def test_normalize_interview_turn_filters_unintroduced_public_facts():
+    question = interviewer._normalize_interview_turn(
+        "我听说公开资料里提到过1977年的一次争执，这是最关键的一幕吗？",
+        "这段如果要写清楚，还缺哪一个具体场景？",
+    )
+
+    assert question == "这段如果要写清楚，还缺哪一个具体场景？"
+
+
 @pytest.mark.asyncio
 async def test_generate_question_replaces_internal_metrics_with_natural_fallback(monkeypatch):
     async def fake_llm_complete_json(*_args, **_kwargs):

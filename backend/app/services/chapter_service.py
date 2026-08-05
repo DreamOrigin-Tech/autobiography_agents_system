@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
@@ -15,8 +16,13 @@ from app.services.patch import patches_to_json
 
 logger = logging.getLogger(__name__)
 
-MIN_USER_ANSWERS_FOR_AI_DRAFT = 2
-MIN_USER_CHARS_FOR_AI_DRAFT = 120
+MIN_USER_ANSWERS_FOR_AI_DRAFT = 12
+MIN_USER_CHARS_FOR_AI_DRAFT = 5000
+MIN_CHAPTER_CHARS_FOR_BIOGRAPHY = 8000
+TARGET_CHAPTER_CHARS_LOW = 8000
+TARGET_CHAPTER_CHARS_HIGH = 12000
+PIVOTAL_CHAPTER_CHARS_LOW = 12000
+PIVOTAL_CHAPTER_CHARS_HIGH = 18000
 
 
 def _mark_project_activity(project: Project) -> None:
@@ -123,6 +129,7 @@ async def write_chapter_content(db: AsyncSession, chapter: Chapter) -> Chapter:
 
     content = await write_chapter(
         chapter.title,
+        chapter.order,
         project.style_notes,
         messages,
         prev_summary,
@@ -215,6 +222,7 @@ async def stream_write_chapter_content(
     max_forbidden_len = max((len(term) for term in forbidden_terms), default=0)
     async for token in stream_write_chapter(
         chapter.title,
+        chapter.order,
         project.style_notes,
         messages,
         prev_summary,
@@ -421,7 +429,7 @@ def write_readiness(messages: list[dict[str, str]]) -> dict[str, int | bool | st
     stats = material_stats(messages)
     ready = has_enough_material_for_ai_draft(messages)
     if ready:
-        message = "采访素材已达到 AI 写作建议门槛，可以开始生成正文。"
+        message = "采访素材已达到出版级传记章节写作门槛，可以开始生成较完整正文。"
     else:
         missing_answers = max(0, MIN_USER_ANSWERS_FOR_AI_DRAFT - stats["user_answers"])
         missing_chars = max(0, MIN_USER_CHARS_FOR_AI_DRAFT - stats["user_chars"])
@@ -496,6 +504,11 @@ def chapter_quality_report(
     user_text = "\n".join(
         m.get("content", "").strip() for m in messages if m.get("role") == "user"
     ).strip()
+    source_text = "\n".join(
+        item
+        for item in (user_text, style_notes or "", preference_notes or "", memory_notes or "")
+        if item
+    )
     user_keywords = _material_anchors(user_text)
     matched_keywords = [kw for kw in user_keywords if kw and kw in draft]
     keyword_ratio = len(set(matched_keywords)) / max(1, len(set(user_keywords)))
@@ -519,6 +532,29 @@ def chapter_quality_report(
         score += 1
     else:
         suggestions.append("先生成或补写一版完整正文。")
+
+    has_biography_length = len(draft) >= MIN_CHAPTER_CHARS_FOR_BIOGRAPHY
+    checks.append({
+        "name": "传记章节体量",
+        "passed": has_biography_length,
+        "detail": (
+            f"正文约 {len(draft)} 字，已达到传记章节最低体量。"
+            if has_biography_length
+            else (
+                f"正文约 {len(draft)} 字，低于传记章节建议最低 "
+                f"{MIN_CHAPTER_CHARS_FOR_BIOGRAPHY} 字。"
+            )
+        ),
+    })
+    if has_biography_length:
+        score += 1
+    else:
+        risks.append("正文更像短文或章节梗概，尚未达到出版级传记章节体量。")
+        suggestions.append(
+            f"继续采访补足 5-10 个关键场景，并扩写到普通章节约 "
+            f"{TARGET_CHAPTER_CHARS_LOW}-{TARGET_CHAPTER_CHARS_HIGH} 字；"
+            f"关键转折章节约 {PIVOTAL_CHAPTER_CHARS_LOW}-{PIVOTAL_CHAPTER_CHARS_HIGH} 字。"
+        )
 
     uses_material = bool(user_text) and keyword_ratio >= 0.08
     checks.append({
@@ -544,9 +580,32 @@ def chapter_quality_report(
         risks.append("正文包含用户明确要求避免的内容。")
         suggestions.append("按偏好删除或替换敏感称呼、姓名和隐私细节。")
 
+    unsupported_specifics = _unsupported_specifics(draft, source_text)
+    facts_grounded = not unsupported_specifics
+    checks.append({
+        "name": "事实锚点支撑",
+        "passed": facts_grounded,
+        "detail": (
+            "未发现明显缺少素材支撑的具体事实。"
+            if facts_grounded
+            else f"发现 {len(unsupported_specifics)} 个可能缺少素材支撑的具体事实。"
+        ),
+    })
+    if facts_grounded:
+        score += 1
+    else:
+        risks.append("正文出现采访素材或用户偏好中没有支撑的具体事实。")
+        suggestions.append(
+            "复核或补采这些事实锚点："
+            + "、".join(unsupported_specifics[:8])
+        )
+
     material_chars = len(user_text)
     length_ratio = len(draft) / max(1, material_chars)
-    low_invention_risk = material_chars >= 120 and length_ratio <= 8
+    low_invention_risk = (
+        material_chars >= MIN_USER_CHARS_FOR_AI_DRAFT
+        and length_ratio <= 3.5
+    )
     checks.append({
         "name": "编造风险",
         "passed": low_invention_risk,
@@ -571,10 +630,16 @@ def chapter_quality_report(
         risks.append("采访素材维度还不够完整。")
         suggestions.append(str(coverage["next_suggestion"]))
 
-    if score >= 5:
+    if not has_biography_length:
+        status = "risky"
+        message = "这版正文更像短文或章节梗概，离出版级传记章节体量还不够，建议继续采访并扩写后再定稿。"
+    elif unsupported_specifics:
+        status = "needs_review" if len(unsupported_specifics) <= 3 else "risky"
+        message = "这版正文已有传记体量，但部分具体事实缺少素材支撑，建议复核后再定稿。"
+    elif score >= 7:
         status = "good"
         message = "这版正文整体可靠，可以进入精修。"
-    elif score >= 3:
+    elif score >= 5:
         status = "needs_review"
         message = "这版正文已有基础，建议按提示补充或删改后再定稿。"
     else:
@@ -583,7 +648,7 @@ def chapter_quality_report(
 
     return {
         "score": score,
-        "max_score": 5,
+        "max_score": 7,
         "status": status,
         "checks": checks,
         "risks": risks,
@@ -601,6 +666,100 @@ def _dedupe_strings(items: list[str]) -> list[str]:
             result.append(normalized)
             seen.add(normalized)
     return result
+
+
+def _unsupported_specifics(content: str, source_text: str) -> list[str]:
+    """Find precise fact anchors in content that are absent from source material.
+
+    This is intentionally conservative and deterministic. It catches the common
+    failure mode where the model adds public-looking but uncollected details
+    such as extra English names, institutions, years, counts, prices, or
+    technical parameters.
+    """
+    if not content.strip():
+        return []
+
+    patterns = (
+        r"\b[A-Z][A-Za-z0-9.+#&-]{1,}(?:\s+[A-Z][A-Za-z0-9.+#&-]{1,})*\b",
+        r"\d{3,4}\s*(?:年|台|美元|赫兹|Hz|hz)?",
+        r"[一二三四五六七八九十百千万]+(?:台|美元|赫兹)",
+    )
+    allow = {
+        "AI", "API", "Markdown",
+    }
+    generic_quantities = {"一台", "一个", "一种", "一件", "一次"}
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for pattern in patterns:
+        for match in re.finditer(pattern, content):
+            anchor = match.group(0).strip()
+            if (
+                not anchor
+                or anchor in allow
+                or anchor in generic_quantities
+                or _anchor_supported(anchor, source_text)
+                or anchor in seen
+            ):
+                continue
+            anchors.append(anchor)
+            seen.add(anchor)
+    return anchors[:20]
+
+
+def _anchor_supported(anchor: str, source_text: str) -> bool:
+    if anchor in source_text or anchor.lower() in source_text.lower():
+        return True
+
+    latin_parts = re.findall(r"[A-Za-z][A-Za-z0-9.+#-]*", anchor)
+    if len(latin_parts) > 1 and all(part.lower() in source_text.lower() for part in latin_parts):
+        return True
+
+    digit_parts = re.findall(r"\d+", anchor)
+    if digit_parts and all(part in source_text for part in digit_parts):
+        return True
+
+    chinese_number = re.match(r"^([一二三四五六七八九十百千万]+)(台|美元|赫兹)$", anchor)
+    if chinese_number:
+        number = _chinese_number_to_int(chinese_number.group(1))
+        unit = chinese_number.group(2)
+        if number is not None and (
+            f"{number}{unit}" in source_text or f"{number} {unit}" in source_text
+        ):
+            return True
+
+    return False
+
+
+def _chinese_number_to_int(value: str) -> int | None:
+    digits = {
+        "零": 0,
+        "一": 1,
+        "二": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
+    units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+    if not value:
+        return None
+    total = 0
+    current = 0
+    for char in value:
+        if char in digits:
+            current = digits[char]
+            continue
+        if char not in units:
+            return None
+        unit = units[char]
+        if current == 0:
+            current = 1
+        total += current * unit
+        current = 0
+    return total + current
 
 
 def _material_anchors(text: str) -> list[str]:

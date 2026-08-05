@@ -22,6 +22,7 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -112,6 +113,21 @@ export default function ProjectSettingsPage() {
       setError(e instanceof Error ? e.message : "操作失败");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function handleExportPdf() {
+    if (!project) return;
+    setExportingPdf(true);
+    setError("");
+    try {
+      const blob = await api.exportProjectPdf(projectId);
+      downloadBlob(blob, `${safeFilename(project.title)}.pdf`);
+      toast("PDF 已生成", "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "PDF 导出失败");
+    } finally {
+      setExportingPdf(false);
     }
   }
 
@@ -233,11 +249,19 @@ export default function ProjectSettingsPage() {
                     <button type="button" onClick={handlePublish} disabled={publishDisabled} className="rounded-xl border border-[#a7f3d0] py-2.5 text-sm font-medium text-[#0f9d73] transition hover:bg-[#ecfdf5] disabled:opacity-40">更新发布</button>
                     <button type="button" onClick={handleUnpublish} disabled={publishing} className="btn-outline py-2.5 text-sm">取消发布</button>
                   </div>
+                  <button type="button" onClick={handleExportPdf} disabled={exportingPdf || !canPublish} className="btn-primary flex w-full items-center justify-center gap-2 py-3 text-sm disabled:opacity-50">
+                    {exportingPdf ? <SpinnerIcon /> : <PdfIcon />} {exportingPdf ? "AI 正在排版..." : "AI 排版并下载 PDF"}
+                  </button>
                 </div>
               ) : (
-                <button type="button" onClick={handlePublish} disabled={publishDisabled} className="btn-primary mt-5 flex w-full items-center justify-center gap-2 py-3.5">
-                  <PublishIcon /> {publishLabel}
-                </button>
+                <div className="mt-5 space-y-2">
+                  <button type="button" onClick={handlePublish} disabled={publishDisabled} className="btn-primary flex w-full items-center justify-center gap-2 py-3.5">
+                    <PublishIcon /> {publishLabel}
+                  </button>
+                  <button type="button" onClick={handleExportPdf} disabled={exportingPdf || !canPublish} className="btn-outline flex w-full items-center justify-center gap-2 py-3 text-sm disabled:opacity-50">
+                    {exportingPdf ? <SpinnerIcon /> : <PdfIcon />} {exportingPdf ? "AI 正在排版..." : "AI 排版并下载 PDF"}
+                  </button>
+                </div>
               )}
             </section>
 
@@ -267,6 +291,21 @@ export default function ProjectSettingsPage() {
 function buildShareUrl(token: string): string {
   if (typeof window === "undefined") return "";
   return `${window.location.origin}/share/${token}`;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}
+
+function safeFilename(title: string): string {
+  return title.replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 48) || "autobiography";
 }
 
 function qualityColor(status: "good" | "needs_review" | "risky"): string {
@@ -303,6 +342,10 @@ function PenIcon() {
 
 function PublishIcon() {
   return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 16V3M7 8l5-5 5 5M5 21h14" /></svg>;
+}
+
+function PdfIcon() {
+  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H7a2 2 0 00-2 2v16a2 2 0 002 2h10a2 2 0 002-2V7z" /><path d="M14 2v5h5M8 13h8M8 17h5" /></svg>;
 }
 
 function SaveIcon() {

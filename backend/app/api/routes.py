@@ -2,7 +2,7 @@ import json
 import logging
 import secrets
 from collections.abc import AsyncGenerator
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
@@ -28,6 +28,8 @@ from app.rate_limit import rate_limit_llm
 from app.schemas import (
     AuthProvidersResponse,
     AuthUserResponse,
+    AsrRequest,
+    AsrResponse,
     ChapterManualUpdate,
     ChapterCoverageResponse,
     ChapterQualityResponse,
@@ -35,6 +37,8 @@ from app.schemas import (
     EditPreviewResponse,
     EditRequest,
     InterviewAnswerRequest,
+    InterviewAssistantRequest,
+    InterviewAssistantResponse,
     InterviewMessageSchema,
     LoginRequest,
     LoginResponse,
@@ -49,15 +53,20 @@ from app.schemas import (
     PublishReadinessResponse,
     PublishResponse,
     RevisionSchema,
+    TtsRequest,
     WriteReadinessResponse,
 )
 from app.services import (
     chapter_service,
+    asr_service,
+    book_refine_service,
     interview_service,
     outline_interview_service,
     project_service,
     publish_service,
+    tts_service,
 )
+from app.services.book_pdf import BookPdfDependencyError
 from app.services import wechat_auth
 from app.services.patch import unified_diff
 
@@ -476,6 +485,41 @@ async def submit_interview_answer(
     return result
 
 
+@router.get(
+    "/chapters/{chapter_id}/interview/assistant",
+    response_model=InterviewAssistantResponse,
+)
+async def get_interview_assistant_guidance(
+    chapter_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return await interview_service.generate_assistant_guidance(db, chapter)
+
+
+@router.post(
+    "/chapters/{chapter_id}/interview/assistant/record",
+    response_model=InterviewAssistantResponse,
+)
+async def record_interview_assistant_turn(
+    chapter_id: str,
+    body: InterviewAssistantRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return await interview_service.record_assistant_turn(db, chapter, body.role, body.content)
+
+
 @router.get("/chapters/{chapter_id}/interview/stream")
 async def stream_interview(
     chapter_id: str,
@@ -497,6 +541,49 @@ async def stream_interview(
             yield {"event": "error", "data": json.dumps({"message": str(exc)})}
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/tts")
+async def synthesize_tts(
+    body: TtsRequest,
+    request: Request,
+    _: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    try:
+        audio = await tts_service.synthesize_speech(body.text)
+    except tts_service.TTSConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("TTS synthesis failed: %s", exc)
+        raise HTTPException(status_code=502, detail="语音合成服务暂时不可用") from exc
+
+    response = Response(content=audio, media_type="audio/mpeg")
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.post("/asr", response_model=AsrResponse)
+async def transcribe_asr(
+    body: AsrRequest,
+    request: Request,
+    _: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    try:
+        audio = asr_service.decode_audio_base64(body.audio_base64)
+        text = await asr_service.transcribe_audio_bytes(audio, body.mime_type)
+    except asr_service.ASRConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.warning("ASR transcription failed: %s", exc)
+        raise HTTPException(status_code=502, detail="语音识别服务暂时不可用") from exc
+
+    return AsrResponse(text=text)
 
 
 @router.post("/chapters/{chapter_id}/write")
@@ -563,6 +650,26 @@ async def get_chapter_quality(
         project.preference_notes if project else None,
         project.memory_notes if project else None,
     )
+
+
+@router.post("/chapters/{chapter_id}/refine/publish-level")
+async def refine_chapter_to_publish_level(
+    chapter_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    project = await project_service.get_project(db, chapter.project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        return await book_refine_service.refine_chapter_to_publish_level(db, project, chapter)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/chapters/{chapter_id}/write/stream")
@@ -709,6 +816,47 @@ async def get_publish_readiness(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
     return await publish_service.publish_readiness(db, project)
+
+
+@router.post("/projects/{project_id}/refine/publish-level")
+async def refine_project_to_publish_level(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        return await book_refine_service.refine_project_to_publish_level(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/projects/{project_id}/export/pdf")
+async def export_project_pdf(
+    project_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        pdf_bytes, filename = await publish_service.export_project_pdf(db, project)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except BookPdfDependencyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    headers = {
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+        "Cache-Control": "no-store",
+    }
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
 
 @router.post("/projects/{project_id}/unpublish", response_model=ProjectDetail)

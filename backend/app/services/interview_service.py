@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.interview_assistant import generate_assistant_brief
 from app.agents.interviewer import generate_question, parse_topics
 from app.agents.memory import memory
 from app.models import (
@@ -163,6 +164,68 @@ async def submit_answer(db: AsyncSession, chapter: Chapter, content: str) -> dic
     result["memory_notes"] = learned_notes
     result["answer_quality"] = quality
     return result
+
+
+async def record_assistant_turn(
+    db: AsyncSession,
+    chapter: Chapter,
+    role: str,
+    content: str,
+) -> dict:
+    project_result = await db.execute(select(Project).where(Project.id == chapter.project_id))
+    project = project_result.scalar_one()
+    session = await get_or_create_session(db, project, chapter)
+    await add_message(db, session, role, content)
+    messages = await get_session_messages(db, session.id)
+    msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+    topics = parse_topics(chapter.interview_topics)
+    coverage = chapter_coverage(msg_dicts)
+    coverage_context = _coverage_prompt_context(coverage)
+    brief = await generate_assistant_brief(chapter.title, topics, msg_dicts, coverage_context)
+    brief["session_id"] = session.id
+    brief["chapter_coverage"] = coverage
+    brief["transcript_stats"] = _assistant_transcript_stats(msg_dicts)
+    return brief
+
+
+async def generate_assistant_guidance(db: AsyncSession, chapter: Chapter) -> dict:
+    project_result = await db.execute(select(Project).where(Project.id == chapter.project_id))
+    project = project_result.scalar_one()
+    session = await get_or_create_session(db, project, chapter)
+    messages = await get_session_messages(db, session.id)
+    msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+    topics = parse_topics(chapter.interview_topics)
+    coverage = chapter_coverage(msg_dicts)
+    coverage_context = _coverage_prompt_context(coverage)
+    brief = await generate_assistant_brief(chapter.title, topics, msg_dicts, coverage_context)
+    brief["session_id"] = session.id
+    brief["chapter_coverage"] = coverage
+    brief["transcript_stats"] = _assistant_transcript_stats(msg_dicts)
+    return brief
+
+
+def _assistant_transcript_stats(messages: list[dict[str, str]]) -> dict:
+    interviewee_turns = [
+        m.get("content", "")
+        for m in messages
+        if m.get("role") == "user" and m.get("content", "").strip()
+    ]
+    interviewer_turns = [
+        m.get("content", "")
+        for m in messages
+        if m.get("role") == "interviewer" and m.get("content", "").strip()
+    ]
+    note_turns = [
+        m.get("content", "")
+        for m in messages
+        if m.get("role") == "note" and m.get("content", "").strip()
+    ]
+    return {
+        "interviewee_turns": len(interviewee_turns),
+        "interviewer_turns": len(interviewer_turns),
+        "note_turns": len(note_turns),
+        "interviewee_chars": sum(len(text) for text in interviewee_turns),
+    }
 
 
 def _coverage_prompt_context(coverage: dict) -> str:

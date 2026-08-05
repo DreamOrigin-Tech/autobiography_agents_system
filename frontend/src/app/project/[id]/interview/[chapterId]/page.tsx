@@ -4,7 +4,15 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { AnswerQuality, ChapterCoverage, InterviewMessage, ProjectDetail, WriteReadiness } from "@/lib/types";
+import type {
+  AnswerQuality,
+  ChapterCoverage,
+  InterviewAssistantResponse,
+  InterviewAssistantRole,
+  InterviewMessage,
+  ProjectDetail,
+  WriteReadiness,
+} from "@/lib/types";
 import { ChatBubble } from "@/components/ChatBubble";
 import { BottomNav } from "@/components/BottomNav";
 import { ChapterSidebar } from "@/components/ChapterSidebar";
@@ -16,7 +24,10 @@ import {
   createChineseRecognition,
   getVoiceSupport,
   initialVoiceState,
+  playSpeechBlob,
+  selectAudioRecordingMimeType,
   speakChinese,
+  speakWithPreferredVoice,
   splitRecognitionResult,
   type SpeechRecognitionLike,
   type VoiceSupport,
@@ -48,15 +59,26 @@ export default function InterviewChatPage() {
   const [editingPreferences, setEditingPreferences] = useState(false);
   const [preferenceDraft, setPreferenceDraft] = useState("");
   const [savingPreferences, setSavingPreferences] = useState(false);
+  const [workMode, setWorkMode] = useState<"ai" | "assistant">("ai");
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantRole, setAssistantRole] = useState<InterviewAssistantRole>("user");
+  const [assistantAdvice, setAssistantAdvice] = useState<InterviewAssistantResponse | null>(null);
+  const [assistantLoading, setAssistantLoading] = useState(false);
   const [voiceMode, setVoiceMode] = useState<"text" | "voice">("text");
   const [voiceSupport, setVoiceSupport] = useState<VoiceSupport>({
     recognition: false,
+    recording: false,
     synthesis: false,
     supported: false,
   });
   const [voiceState, dispatchVoice] = useReducer(voiceReducer, initialVoiceState);
   const bottomRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingShouldSubmitRef = useRef(false);
+  const recordingSessionRef = useRef(0);
   const voiceActiveRef = useRef(false);
   const voicePhaseRef = useRef(voiceState.phase);
   const sendingRef = useRef(false);
@@ -83,6 +105,7 @@ export default function InterviewChatPage() {
   }
 
   function stopRecognition() {
+    stopRecording(false);
     const recognition = recognitionRef.current;
     recognitionRef.current = null;
     if (!recognition) return;
@@ -93,11 +116,34 @@ export default function InterviewChatPage() {
     }
   }
 
+  function stopRecording(shouldSubmit: boolean) {
+    recordingShouldSubmitRef.current = shouldSubmit;
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      return;
+    }
+    if (!shouldSubmit) cleanupRecording();
+  }
+
+  function cleanupRecording() {
+    mediaRecorderRef.current = null;
+    mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
+    recordingChunksRef.current = [];
+    recordingShouldSubmitRef.current = false;
+  }
+
   function startListening() {
     if (!voiceActiveRef.current || sendingRef.current) return;
     clearVoiceTimer();
     stopRecognition();
     setError("");
+
+    if (voiceSupport.recording && typeof navigator !== "undefined" && navigator.mediaDevices) {
+      void startBackendAsrRecording();
+      return;
+    }
 
     const recognition = createChineseRecognition({
       onstart: () => {
@@ -107,20 +153,14 @@ export default function InterviewChatPage() {
       onresult: (event) => {
         const { finalText, interimText } = splitRecognitionResult(event);
         if (finalText) {
-          voicePhaseRef.current = "submitting";
+          voicePhaseRef.current = "reviewing";
           setInput(finalText);
-          dispatchVoice({ type: "final-transcript", transcript: finalText });
+          dispatchVoice({ type: "transcript-ready", transcript: finalText });
           try {
             recognition?.stop();
           } catch {
             // The final result can arrive just as the browser ends listening.
           }
-          voiceTimerRef.current = window.setTimeout(() => {
-            voiceTimerRef.current = null;
-            if (voiceActiveRef.current && !sendingRef.current) {
-              void submitAnswerContent(finalText, "voice");
-            }
-          }, 350);
           return;
         }
         if (interimText) {
@@ -176,6 +216,125 @@ export default function InterviewChatPage() {
     }
   }
 
+  async function startBackendAsrRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      if (!voiceActiveRef.current || sendingRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      const mimeType = selectAudioRecordingMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const session = recordingSessionRef.current + 1;
+      const chunks: Blob[] = [];
+      recordingSessionRef.current = session;
+      mediaStreamRef.current = stream;
+      mediaRecorderRef.current = recorder;
+      recordingChunksRef.current = chunks;
+      recordingShouldSubmitRef.current = false;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onerror = () => {
+        if (!voiceActiveRef.current) return;
+        const message = "麦克风录音失败。请检查权限或切换回文字输入。";
+        voiceActiveRef.current = false;
+        voicePhaseRef.current = "error";
+        cleanupRecording();
+        dispatchVoice({ type: "error", message });
+        setError(message);
+      };
+      recorder.onstop = () => {
+        const isCurrentSession = recordingSessionRef.current === session;
+        const shouldSubmit = isCurrentSession && recordingShouldSubmitRef.current;
+        const type = mimeType || chunks[0]?.type || "audio/webm";
+        if (isCurrentSession) {
+          cleanupRecording();
+        } else {
+          stream.getTracks().forEach((track) => track.stop());
+        }
+        if (!shouldSubmit || !voiceActiveRef.current || sendingRef.current) return;
+        const audio = new Blob(chunks, { type });
+        void transcribeAndReviewRecording(audio);
+      };
+
+      recorder.start();
+      voicePhaseRef.current = "listening";
+      dispatchVoice({ type: "listening-started" });
+    } catch {
+      const message = "麦克风暂时无法启动，请检查权限后再试。";
+      voiceActiveRef.current = false;
+      voicePhaseRef.current = "error";
+      cleanupRecording();
+      dispatchVoice({ type: "error", message });
+      setError(message);
+    }
+  }
+
+  async function transcribeAndReviewRecording(audio: Blob) {
+    if (audio.size === 0) {
+      const message = "这次没有听清，可以再说一遍。";
+      setError(message);
+      return;
+    }
+
+    voicePhaseRef.current = "submitting";
+    dispatchVoice({ type: "submit-started" });
+    setError("");
+    try {
+      const transcript = (await api.transcribeSpeech(audio)).trim();
+      if (!transcript) {
+        throw new Error("这次没有听清，可以再说一遍。");
+      }
+      setInput(transcript);
+      voicePhaseRef.current = "reviewing";
+      dispatchVoice({ type: "transcript-ready", transcript });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "语音识别服务暂时不可用";
+      voiceActiveRef.current = false;
+      voicePhaseRef.current = "error";
+      dispatchVoice({ type: "error", message });
+      setError(message);
+    }
+  }
+
+  function submitReviewedVoiceAnswer() {
+    const transcript = (input || voiceState.transcript).trim();
+    if (!transcript || sendingRef.current) return;
+    voicePhaseRef.current = "submitting";
+    dispatchVoice({ type: "submit-started" });
+    void submitAnswerContent(transcript, "voice");
+  }
+
+  function retryVoiceRecording() {
+    if (!voiceActiveRef.current || sendingRef.current) return;
+    setInput("");
+    setError("");
+    voicePhaseRef.current = "listening";
+    dispatchVoice({ type: "listening-started" });
+    startListening();
+  }
+
+  function finishVoiceRecording() {
+    if (mediaRecorderRef.current) {
+      stopRecording(true);
+      return;
+    }
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // The browser may already have ended recognition.
+    }
+  }
+
   async function speakPromptAndListen(prompt: string) {
     if (!voiceActiveRef.current || !prompt.trim()) {
       if (voiceActiveRef.current) startListening();
@@ -187,11 +346,22 @@ export default function InterviewChatPage() {
     speechRunRef.current = run;
     voicePhaseRef.current = "speaking";
     dispatchVoice({ type: "speech-started" });
-    await speakChinese(prompt);
+    await speakAgentPrompt(prompt);
     if (run !== speechRunRef.current || !voiceActiveRef.current) return;
     voicePhaseRef.current = "listening";
     dispatchVoice({ type: "speech-ended" });
     startListening();
+  }
+
+  async function speakAgentPrompt(prompt: string) {
+    await speakWithPreferredVoice(
+      prompt,
+      async (text) => {
+        const audio = await api.synthesizeSpeech(text);
+        await playSpeechBlob(audio);
+      },
+      speakChinese,
+    );
   }
 
   async function submitAnswerContent(content: string, source: "text" | "voice") {
@@ -240,7 +410,7 @@ export default function InterviewChatPage() {
           if (result.suggested_action === "write_chapter") {
             const run = speechRunRef.current + 1;
             speechRunRef.current = run;
-            await speakChinese(question);
+            await speakAgentPrompt(question);
             if (run === speechRunRef.current) stopVoiceConversation();
           } else {
             await speakPromptAndListen(question);
@@ -320,9 +490,27 @@ export default function InterviewChatPage() {
   useEffect(() => {
     return () => {
       voiceActiveRef.current = false;
-      clearVoiceTimer();
+      if (voiceTimerRef.current !== null) {
+        window.clearTimeout(voiceTimerRef.current);
+        voiceTimerRef.current = null;
+      }
       speechRunRef.current += 1;
-      stopRecognition();
+      const recorder = mediaRecorderRef.current;
+      recordingShouldSubmitRef.current = false;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      mediaRecorderRef.current = null;
+      mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
+      recordingChunksRef.current = [];
+      const recognition = recognitionRef.current;
+      recognitionRef.current = null;
+      try {
+        recognition?.abort();
+      } catch {
+        // The browser may already have ended recognition.
+      }
       cancelSpeech();
     };
   }, []);
@@ -412,6 +600,40 @@ export default function InterviewChatPage() {
     finally { setSavingPreferences(false); }
   }
 
+  async function refreshAssistantGuidance() {
+    setAssistantLoading(true); setError("");
+    try {
+      const advice = await api.getInterviewAssistantGuidance(chapterId);
+      setAssistantAdvice(advice);
+      setCoverage(advice.chapter_coverage);
+      setSuggestedAction(advice.suggested_action);
+    } catch (e) { setError(e instanceof Error ? e.message : "生成采访提示失败"); }
+    finally { setAssistantLoading(false); }
+  }
+
+  async function handleRecordAssistantTurn(e: React.FormEvent) {
+    e.preventDefault();
+    const content = assistantInput.trim();
+    if (!content || assistantLoading) return;
+    setAssistantLoading(true); setError("");
+    setAssistantInput("");
+    try {
+      const advice = await api.recordInterviewAssistantTurn(chapterId, assistantRole, content);
+      const [refreshed, refreshedReadiness] = await Promise.all([
+        api.getInterviewMessages(chapterId),
+        api.getWriteReadiness(chapterId),
+      ]);
+      setMessages(refreshed);
+      setReadiness(refreshedReadiness);
+      setCoverage(advice.chapter_coverage);
+      setSuggestedAction(advice.suggested_action);
+      setAssistantAdvice(advice);
+    } catch (e) {
+      setAssistantInput(content);
+      setError(e instanceof Error ? e.message : "记录失败");
+    } finally { setAssistantLoading(false); }
+  }
+
   if (loading) return (<div className="mx-auto max-w-6xl pt-4"><ChatSkeleton /></div>);
 
   const currentChapter = project?.chapters.find((c) => c.id === chapterId);
@@ -430,7 +652,7 @@ export default function InterviewChatPage() {
                 <ArrowLeftIcon /> 章节列表
               </Link>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <h1 className="text-lg font-semibold text-[#1f2937]">AI 记者采访</h1>
+                <h1 className="text-lg font-semibold text-[#1f2937]">{workMode === "assistant" ? "采访助理模式" : "AI 记者采访"}</h1>
                 {currentChapter && <span className="rounded-full bg-[#f0fdfa] px-2.5 py-1 text-xs font-medium text-[#0f766e]">第 {currentChapter.order} 章</span>}
               </div>
               {currentChapter && <p className="mt-1 truncate text-sm text-[#667085]">{currentChapter.title}</p>}
@@ -444,9 +666,32 @@ export default function InterviewChatPage() {
         <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_18rem]">
           <section className="order-2 min-w-0 px-4 py-5 pb-56 sm:px-7 md:order-1 md:max-w-3xl md:justify-self-center md:w-full">
             {error && !(voiceMode === "voice" && voiceState.error) && <div className="mb-4 rounded-xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#b42318]">{error}</div>}
-            <div className="mb-5 rounded-xl border border-[#dfe5eb] bg-[#f7f8fa] px-4 py-3 text-xs leading-relaxed text-[#667085]">
-              <span className="font-medium text-[#344054]">慢慢说就好：</span> 不必一次讲完整，想到什么片段就从哪里开始。
+            <div className="mb-5 inline-flex rounded-lg border border-[#dfe5eb] bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => { setWorkMode("ai"); setError(""); }}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${workMode === "ai" ? "bg-[#0f766e] text-white" : "text-[#667085] hover:bg-[#f7f8fa] hover:text-[#1f2937]"}`}
+              >
+                AI 采访
+              </button>
+              <button
+                type="button"
+                onClick={() => { stopVoiceConversation(); setVoiceMode("text"); setWorkMode("assistant"); setError(""); if (!assistantAdvice) void refreshAssistantGuidance(); }}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${workMode === "assistant" ? "bg-[#0f766e] text-white" : "text-[#667085] hover:bg-[#f7f8fa] hover:text-[#1f2937]"}`}
+              >
+                采访助理
+              </button>
             </div>
+            <div className="mb-5 rounded-xl border border-[#dfe5eb] bg-[#f7f8fa] px-4 py-3 text-xs leading-relaxed text-[#667085]">
+              <span className="font-medium text-[#344054]">{workMode === "assistant" ? "现场记录：" : "慢慢说就好："}</span> {workMode === "assistant" ? "采访员可以边聊边记录，系统会帮你整理下一问和遗漏事实。" : "不必一次讲完整，想到什么片段就从哪里开始。"}
+            </div>
+            {workMode === "assistant" && (
+              <AssistantGuidancePanel
+                advice={assistantAdvice}
+                loading={assistantLoading}
+                onRefresh={refreshAssistantGuidance}
+              />
+            )}
             {messages.map((msg) => <ChatBubble key={msg.id} role={msg.role} content={msg.content} />)}
             {lastAnswerQuality && shouldShowDetailNudge(lastAnswerQuality.is_substantive, lastSubmittedAnswer) && (
               <div className="animate-fade-up my-4 rounded-xl border border-[#fedf89] bg-[#fffaeb] px-4 py-3 text-sm text-[#b54708]">
@@ -540,8 +785,42 @@ export default function InterviewChatPage() {
           </aside>
         </div>
 
-        <form onSubmit={handleSend} className="fixed bottom-16 inset-x-0 z-20 border-t border-[#dfe5eb] bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:bottom-0 md:left-72 md:px-7">
+        <form onSubmit={workMode === "assistant" ? handleRecordAssistantTurn : handleSend} className="fixed bottom-16 inset-x-0 z-20 border-t border-[#dfe5eb] bg-white/95 px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-xl md:bottom-0 md:left-72 md:px-7">
           <div className="mx-auto max-w-3xl">
+            {workMode === "assistant" ? (
+              <>
+                <div role="tablist" aria-label="记录类型" className="mb-3 inline-flex rounded-lg border border-[#dfe5eb] bg-[#f7f8fa] p-1">
+                  {assistantRoleOptions.map((option) => (
+                    <button
+                      key={option.role}
+                      type="button"
+                      role="tab"
+                      aria-selected={assistantRole === option.role}
+                      onClick={() => setAssistantRole(option.role)}
+                      className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${assistantRole === option.role ? "bg-white text-[#1f2937] shadow-sm" : "text-[#667085] hover:text-[#1f2937]"}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-end gap-2">
+                  <textarea
+                    value={assistantInput}
+                    onChange={(e) => setAssistantInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); } }}
+                    placeholder={assistantPlaceholder(assistantRole)}
+                    rows={2}
+                    disabled={assistantLoading}
+                    aria-label="采访记录"
+                    className="input max-h-40 min-h-14 flex-1 resize-y text-base leading-relaxed"
+                  />
+                  <button type="submit" aria-label="记录并生成提示" disabled={assistantLoading || !assistantInput.trim()} title="记录并生成提示" className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[#0f766e] text-white transition hover:bg-[#115e59] disabled:cursor-not-allowed disabled:opacity-40 active:scale-95">
+                    <SendIcon />
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
             <div role="tablist" aria-label="回答方式" className="mb-3 inline-flex rounded-lg border border-[#dfe5eb] bg-[#f7f8fa] p-1">
               <button
                 type="button"
@@ -565,7 +844,7 @@ export default function InterviewChatPage() {
 
             {voiceMode === "voice" ? (
               <div className="rounded-2xl border border-[#b8dcd7] bg-[#f0fdfa] px-4 py-3 shadow-[0_4px_18px_-12px_rgba(15,118,110,0.55)]">
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${voiceState.active ? "bg-[#0f766e] text-white ai-glow" : "bg-white text-[#0f766e]"}`}>
                     {voiceState.phase === "speaking" ? <SoundIcon /> : <MicIcon />}
                   </div>
@@ -579,8 +858,23 @@ export default function InterviewChatPage() {
                     </button>
                   )}
                   {voiceState.active && voiceState.phase === "listening" && (
-                    <button type="button" onClick={pauseVoiceConversation} className="btn-outline inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs">
+                    <button type="button" onClick={finishVoiceRecording} className="btn-primary inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs">
+                      <CheckIcon /> 说完了
+                    </button>
+                  )}
+                  {voiceState.active && voiceState.phase === "listening" && (
+                    <button type="button" onClick={pauseVoiceConversation} className="btn-outline hidden shrink-0 items-center gap-1.5 px-3 py-2 text-xs sm:inline-flex">
                       <PauseIcon /> 暂停
+                    </button>
+                  )}
+                  {voiceState.active && voiceState.phase === "reviewing" && (
+                    <button type="button" onClick={submitReviewedVoiceAnswer} disabled={!input.trim() || sendingRef.current} className="btn-primary inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs disabled:opacity-50">
+                      <SendIcon /> 发送
+                    </button>
+                  )}
+                  {voiceState.active && voiceState.phase === "reviewing" && (
+                    <button type="button" onClick={retryVoiceRecording} className="btn-outline inline-flex shrink-0 items-center gap-1.5 px-3 py-2 text-xs">
+                      <MicIcon /> 重录
                     </button>
                   )}
                   {!voiceState.active && voiceState.phase !== "submitting" && (
@@ -594,19 +888,30 @@ export default function InterviewChatPage() {
                     </button>
                   )}
                 </div>
-                {voiceState.transcript && (
+                {voiceState.phase === "reviewing" ? (
+                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
+                    <label className="mb-1 block text-xs font-medium text-[#0f766e]" htmlFor="voice-transcript-review">识别文字</label>
+                    <textarea
+                      id="voice-transcript-review"
+                      value={input}
+                      onChange={(event) => setInput(event.target.value)}
+                      rows={3}
+                      className="input max-h-32 min-h-20 w-full resize-y bg-white text-sm leading-relaxed"
+                    />
+                  </div>
+                ) : voiceState.transcript && (
                   <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-sm leading-relaxed text-[#344054]">
                     <span className="mr-1 text-xs font-medium text-[#0f766e]">正在听：</span>{voiceState.transcript}
                   </div>
                 )}
                 {!voiceSupport.supported && (
                   <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs leading-relaxed text-[#667085]">
-                    当前浏览器没有同时提供中文语音识别和语音朗读，您仍然可以使用文字采访。
+                    当前浏览器没有同时提供麦克风录音和语音朗读，您仍然可以使用文字采访。
                   </p>
                 )}
                 {voiceSupport.supported && voiceState.phase === "idle" && (
                   <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs leading-relaxed text-[#667085]">
-                    首次使用时，请允许浏览器访问麦克风。AI 会先读出问题，之后自动收音。
+                    首次使用时，请允许浏览器访问麦克风。AI 会先读出问题，之后开始录音。
                   </p>
                 )}
                 {voiceState.error && (
@@ -624,12 +929,73 @@ export default function InterviewChatPage() {
                 </div>
               </>
             )}
+              </>
+            )}
           </div>
         </form>
         <BottomNav projectId={projectId} activeChapterId={chapterId} />
       </div>
     </main>
   );
+}
+
+const assistantRoleOptions: Array<{ role: InterviewAssistantRole; label: string }> = [
+  { role: "user", label: "受访者" },
+  { role: "interviewer", label: "采访员" },
+  { role: "note", label: "备注" },
+];
+
+function AssistantGuidancePanel({
+  advice,
+  loading,
+  onRefresh,
+}: {
+  advice: InterviewAssistantResponse | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className="animate-fade-up mb-5 rounded-xl border border-[#b8dcd7] bg-[#f0fdfa] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[#115e59]">采访员提示</p>
+          <p className="mt-1 text-xs leading-relaxed text-[#667085]">
+            {advice?.live_summary || "记录一段受访者回答后，我会给你下一问、追问重点和需要补齐的事实。"}
+          </p>
+        </div>
+        <button type="button" onClick={onRefresh} disabled={loading} className="btn-outline shrink-0 px-3 py-2 text-xs">
+          {loading ? "生成中" : "刷新"}
+        </button>
+      </div>
+      {advice && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <GuidanceList title="下一问" items={advice.next_questions} tone="strong" />
+          <GuidanceList title="追问重点" items={advice.followup_focus} />
+          <GuidanceList title="待补事实" items={advice.missing_facts} />
+        </div>
+      )}
+      {advice?.caution && (
+        <p className="mt-3 rounded-lg bg-white/80 px-3 py-2 text-xs leading-relaxed text-[#667085]">{advice.caution}</p>
+      )}
+    </section>
+  );
+}
+
+function GuidanceList({ title, items, tone = "normal" }: { title: string; items: string[]; tone?: "normal" | "strong" }) {
+  return (
+    <div className="rounded-lg bg-white/85 p-3">
+      <p className={`text-xs font-semibold ${tone === "strong" ? "text-[#0f766e]" : "text-[#344054]"}`}>{title}</p>
+      <ul className="mt-2 space-y-1.5 text-xs leading-relaxed text-[#667085]">
+        {items.map((item) => <li key={item}>• {item}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+function assistantPlaceholder(role: InterviewAssistantRole): string {
+  if (role === "interviewer") return "记录采访员刚问了什么...";
+  if (role === "note") return "记录现场观察、情绪、待核实事项...";
+  return "记录受访者刚才说的话...";
 }
 
 function toMemoryItems(value?: string | null): string[] {
@@ -664,6 +1030,7 @@ function voiceStatusTitle(phase: typeof initialVoiceState.phase): string {
     idle: "像聊天一样说",
     speaking: "AI 正在说",
     listening: "请您说话",
+    reviewing: "请确认文字",
     submitting: "正在记下这段回忆",
     paused: "语音对话已暂停",
     error: "语音暂时不可用",
@@ -676,7 +1043,8 @@ function voiceStatusHint(phase: typeof initialVoiceState.phase, supported: boole
   const hints = {
     idle: "AI 会先读出刚才的问题",
     speaking: "想现在回答，可以直接打断",
-    listening: "说完停一下，我们会自然接着聊",
+    listening: "说完后点一下“说完了”",
+    reviewing: "确认后再发送给 AI",
     submitting: "稍等片刻",
     paused: "准备好后再继续",
     error: "检查权限后可以重新开始",
@@ -710,6 +1078,10 @@ function SoundIcon() {
 
 function PauseIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>;
+}
+
+function CheckIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
 }
 
 function StopIcon() {

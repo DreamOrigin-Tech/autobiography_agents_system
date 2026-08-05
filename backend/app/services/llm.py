@@ -18,6 +18,7 @@ def _build_kwargs(
     stream: bool,
     temperature: float,
     response_format: dict[str, Any] | None,
+    extra_kwargs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     model = settings.resolved_model
     kwargs: dict[str, Any] = {
@@ -37,6 +38,8 @@ def _build_kwargs(
 
     if response_format:
         kwargs["response_format"] = response_format
+    if extra_kwargs:
+        kwargs.update(extra_kwargs)
 
     return kwargs
 
@@ -47,8 +50,14 @@ async def llm_complete(
     stream: bool = False,
     temperature: float = 0.7,
     response_format: dict[str, Any] | None = None,
+    **extra_kwargs: Any,
 ) -> Any:
-    kwargs = _build_kwargs(stream=stream, temperature=temperature, response_format=response_format)
+    kwargs = _build_kwargs(
+        stream=stream,
+        temperature=temperature,
+        response_format=response_format,
+        extra_kwargs=extra_kwargs,
+    )
     kwargs["messages"] = messages
 
     last_exc = None

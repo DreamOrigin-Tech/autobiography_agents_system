@@ -4,6 +4,8 @@ import type {
   ChapterQuality,
   EditPreview,
   InterviewMessage,
+  InterviewAssistantResponse,
+  InterviewAssistantRole,
   InterviewResult,
   OutlineInterviewState,
   ProjectDetail,
@@ -19,6 +21,8 @@ import type {
 const TOKEN_KEY = "auth_token";
 const REQUEST_TIMEOUT_MS = 15_000;
 const AI_REQUEST_TIMEOUT_MS = 180_000;
+const TTS_REQUEST_TIMEOUT_MS = 60_000;
+const ASR_REQUEST_TIMEOUT_MS = 90_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 type RequestOptions = RequestInit & {
@@ -162,6 +166,70 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   return res.json();
 }
 
+async function requestBlob(path: string, options?: RequestOptions): Promise<Blob> {
+  const method = options?.method || "GET";
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...fetchOptions } = options || {};
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(options?.headers as Record<string, string> | undefined),
+  };
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  apiLog(method, path, "→");
+  const start = performance.now();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let res: Response;
+  try {
+    res = await fetch(`${getApiBase()}${path}`, {
+      ...fetchOptions,
+      headers,
+      credentials: "include",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new Error(requestFailureMessage(error));
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  const elapsed = Math.round(performance.now() - start);
+
+  if (res.status === 401) {
+    apiLog(method, path, `401 (${elapsed}ms)`);
+    clearToken();
+    throw new Error("请先登录");
+  }
+
+  if (!res.ok) {
+    const detail = await parseError(res);
+    apiLog(method, path, `${res.status} (${elapsed}ms) — ${detail}`);
+    throw new Error(detail);
+  }
+
+  apiLog(method, path, `${res.status} (${elapsed}ms)`);
+  return res.blob();
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const [, base64] = result.split(",", 2);
+      if (!base64) {
+        reject(new Error("录音数据读取失败"));
+        return;
+      }
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error("录音数据读取失败"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 // ── API ─────────────────────────────────────────────
 
 export const api = {
@@ -261,6 +329,42 @@ export const api = {
       timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
+  getInterviewAssistantGuidance: (chapterId: string) =>
+    request<InterviewAssistantResponse>(`/chapters/${chapterId}/interview/assistant`, {
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
+
+  recordInterviewAssistantTurn: (
+    chapterId: string,
+    role: InterviewAssistantRole,
+    content: string,
+  ) =>
+    request<InterviewAssistantResponse>(`/chapters/${chapterId}/interview/assistant/record`, {
+      method: "POST",
+      body: JSON.stringify({ role, content }),
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
+
+  synthesizeSpeech: (text: string) =>
+    requestBlob("/tts", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+      timeoutMs: TTS_REQUEST_TIMEOUT_MS,
+    }),
+
+  transcribeSpeech: async (audio: Blob) => {
+    const audioBase64 = await blobToBase64(audio);
+    const response = await request<{ text: string }>("/asr", {
+      method: "POST",
+      body: JSON.stringify({
+        audio_base64: audioBase64,
+        mime_type: audio.type || "audio/webm",
+      }),
+      timeoutMs: ASR_REQUEST_TIMEOUT_MS,
+    });
+    return response.text;
+  },
+
   // Writing
   getWriteReadiness: (chapterId: string) =>
     request<WriteReadiness>(`/chapters/${chapterId}/write/readiness`),
@@ -305,6 +409,11 @@ export const api = {
 
   getPublishReadiness: (projectId: string) =>
     request<PublishReadiness>(`/projects/${projectId}/publish/readiness`),
+
+  exportProjectPdf: (projectId: string) =>
+    requestBlob(`/projects/${projectId}/export/pdf`, {
+      timeoutMs: AI_REQUEST_TIMEOUT_MS,
+    }),
 
   unpublishProject: (projectId: string) =>
     request<ProjectDetail>(`/projects/${projectId}/unpublish`, { method: "POST" }),

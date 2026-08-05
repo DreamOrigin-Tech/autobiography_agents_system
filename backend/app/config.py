@@ -37,6 +37,22 @@ class Settings(BaseSettings):
     wechat_app_secret: str = ""
     wechat_redirect_uri: str = ""
     oauth_state_ttl_minutes: int = 10
+    dashscope_api_key: str = ""
+    tts_model: str = "qwen-audio-3.0-tts-flash"
+    tts_voice: str = "longanhuan_v3.6"
+    tts_format: str = "mp3"
+    tts_sample_rate: int = 22050
+    tts_volume: int = 50
+    tts_rate: float = 0.95
+    tts_pitch: float = 1.0
+    tts_timeout_seconds: int = 45
+    tts_websocket_url: str = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+    asr_model: str = "qwen3-asr-flash"
+    asr_language: str = "zh"
+    asr_enable_itn: bool = False
+    asr_timeout_seconds: int = 60
+    asr_max_audio_bytes: int = 7_000_000
+    asr_compatible_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -63,6 +79,12 @@ class Settings(BaseSettings):
         if _is_valid_key(self.openai_api_key):
             return self.openai_api_key
         return _read_env_file("OPENAI_API_KEY")
+
+    @property
+    def effective_dashscope_api_key(self) -> str:
+        if _is_valid_key(self.dashscope_api_key):
+            return self.dashscope_api_key
+        return _read_env_file("DASHSCOPE_API_KEY")
 
     @property
     def resolved_model(self) -> str:

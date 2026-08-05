@@ -125,6 +125,26 @@ export interface InterviewResult {
   answer_quality?: AnswerQuality;
 }
 
+export type InterviewAssistantRole = "user" | "interviewer" | "note";
+
+export interface InterviewAssistantResponse {
+  next_questions: string[];
+  followup_focus: string[];
+  missing_facts: string[];
+  live_summary: string;
+  caution: string;
+  suggested_action: "continue" | "write_chapter";
+  reason: string;
+  session_id: string;
+  chapter_coverage: ChapterCoverage;
+  transcript_stats: {
+    interviewee_turns: number;
+    interviewer_turns: number;
+    note_turns: number;
+    interviewee_chars: number;
+  };
+}
+
 export interface AnswerQuality {
   is_substantive: boolean;
   score: number;

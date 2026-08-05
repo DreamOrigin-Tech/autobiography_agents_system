@@ -41,6 +41,32 @@ DATABASE_URL=sqlite+aiosqlite:///./autobiography.db
 CORS_ORIGINS=http://localhost:6985
 ```
 
+更自然的语音朗读可接入千问 Qwen-Audio-TTS Flash：
+
+```env
+DASHSCOPE_API_KEY=sk-your-dashscope-key
+TTS_MODEL=qwen-audio-3.0-tts-flash
+TTS_VOICE=longanhuan_v3.6
+TTS_FORMAT=mp3
+TTS_SAMPLE_RATE=22050
+TTS_VOLUME=50
+TTS_RATE=0.95
+TTS_PITCH=1.0
+TTS_TIMEOUT_SECONDS=45
+TTS_WEBSOCKET_URL=wss://dashscope.aliyuncs.com/api-ws/v1/inference
+
+# 语音识别，浏览器录音后由后端调用 Qwen-ASR
+ASR_MODEL=qwen3-asr-flash
+ASR_LANGUAGE=zh
+ASR_ENABLE_ITN=false
+ASR_TIMEOUT_SECONDS=60
+ASR_MAX_AUDIO_BYTES=7000000
+ASR_COMPATIBLE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+```
+
+如果切回 `cosyvoice-v3.5-plus`，需要先在千问/DashScope 创建自定义音色，
+再把返回的 voice id 写入 `TTS_VOICE`。
+
 也可以改用 OpenAI：
 
 ```env

@@ -168,6 +168,37 @@ class InterviewAnswerRequest(BaseModel):
     content: str = Field(min_length=1)
 
 
+class InterviewAssistantRequest(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+    role: str = Field(default="user", pattern="^(user|interviewer|note)$")
+
+
+class InterviewAssistantResponse(BaseModel):
+    next_questions: list[str]
+    followup_focus: list[str]
+    missing_facts: list[str]
+    live_summary: str
+    caution: str
+    suggested_action: str
+    reason: str
+    session_id: str
+    chapter_coverage: dict
+    transcript_stats: dict
+
+
+class TtsRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class AsrRequest(BaseModel):
+    audio_base64: str = Field(min_length=1, max_length=10_000_000)
+    mime_type: str = Field(min_length=1, max_length=100)
+
+
+class AsrResponse(BaseModel):
+    text: str
+
+
 class EditRequest(BaseModel):
     instruction: str = Field(min_length=1)
 

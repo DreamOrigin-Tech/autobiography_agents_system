@@ -2,6 +2,7 @@ export type VoicePhase =
   | "idle"
   | "speaking"
   | "listening"
+  | "reviewing"
   | "submitting"
   | "paused"
   | "error";
@@ -28,6 +29,8 @@ export type VoiceEvent =
   | { type: "listening-started" }
   | { type: "interim-transcript"; transcript: string }
   | { type: "final-transcript"; transcript: string }
+  | { type: "transcript-ready"; transcript: string }
+  | { type: "submit-started" }
   | { type: "submit-succeeded" }
   | { type: "submit-failed"; message: string }
   | { type: "pause" }
@@ -51,15 +54,18 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
         ? { ...state, phase: "listening", error: "" }
         : state;
     case "listening-started":
-      return state.active ? { ...state, phase: "listening", error: "" } : state;
+      return state.active ? { ...state, phase: "listening", transcript: "", error: "" } : state;
     case "interim-transcript":
       return state.active
         ? { ...state, phase: "listening", transcript: event.transcript, error: "" }
         : state;
     case "final-transcript":
+    case "transcript-ready":
       return state.active
-        ? { ...state, phase: "submitting", transcript: event.transcript, error: "" }
+        ? { ...state, phase: "reviewing", transcript: event.transcript, error: "" }
         : state;
+    case "submit-started":
+      return state.active ? { ...state, phase: "submitting", error: "" } : state;
     case "submit-succeeded":
       return state.active ? { ...state, phase: "speaking", transcript: "", error: "" } : state;
     case "submit-failed":
@@ -77,6 +83,7 @@ export function voiceReducer(state: VoiceState, event: VoiceEvent): VoiceState {
 
 export interface VoiceSupport {
   recognition: boolean;
+  recording: boolean;
   synthesis: boolean;
   supported: boolean;
 }
@@ -113,6 +120,24 @@ export interface SpeechRecognitionLike {
 
 export type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
+export interface MediaRecorderConstructorLike {
+  new (stream: unknown, options?: { mimeType?: string }): MediaRecorderLike;
+  isTypeSupported?: (mimeType: string) => boolean;
+}
+
+export interface MediaRecorderLike {
+  state: "inactive" | "recording" | "paused";
+  ondataavailable: ((event: { data: Blob }) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onstop: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+}
+
+export interface MediaDevicesLike {
+  getUserMedia: (constraints: unknown) => Promise<unknown>;
+}
+
 export interface SpeechSynthesisUtteranceLike {
   lang: string;
   rate: number;
@@ -143,19 +168,50 @@ export interface SpeechSynthesisLike {
 export interface VoiceEnvironment {
   SpeechRecognition?: SpeechRecognitionConstructor;
   webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  MediaRecorder?: MediaRecorderConstructorLike;
+  mediaDevices?: MediaDevicesLike;
   speechSynthesis?: SpeechSynthesisLike;
   SpeechSynthesisUtterance?: SpeechSynthesisUtteranceConstructor;
 }
 
+let activeSpeechAudio: HTMLAudioElement | null = null;
+let activeSpeechAudioUrl = "";
+
 export function getVoiceSupport(environment?: VoiceEnvironment): VoiceSupport {
   const target = (environment ?? (typeof window !== "undefined" ? window : {})) as VoiceEnvironment;
   const recognition = Boolean(target.SpeechRecognition || target.webkitSpeechRecognition);
+  const mediaDevices = target.mediaDevices ?? (typeof navigator !== "undefined" ? navigator.mediaDevices : undefined);
+  const Recorder =
+    target.MediaRecorder ??
+    (typeof globalThis !== "undefined" && "MediaRecorder" in globalThis
+      ? (globalThis.MediaRecorder as MediaRecorderConstructorLike)
+      : undefined);
+  const recording = Boolean(mediaDevices?.getUserMedia && Recorder);
   const synthesis = Boolean(target.speechSynthesis && target.SpeechSynthesisUtterance);
   return {
     recognition,
+    recording,
     synthesis,
-    supported: recognition && synthesis,
+    supported: recording && synthesis,
   };
+}
+
+export function selectAudioRecordingMimeType(environment?: VoiceEnvironment): string {
+  const target = (environment ?? (typeof window !== "undefined" ? window : {})) as VoiceEnvironment;
+  const Recorder =
+    target.MediaRecorder ??
+    (typeof globalThis !== "undefined" && "MediaRecorder" in globalThis
+      ? (globalThis.MediaRecorder as MediaRecorderConstructorLike)
+      : undefined);
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/aac",
+    "audio/mpeg",
+  ];
+  if (!Recorder?.isTypeSupported) return "";
+  return candidates.find((type) => Recorder.isTypeSupported?.(type)) || "";
 }
 
 export function createChineseRecognition(
@@ -244,6 +300,61 @@ export async function speakChinese(
   }
 }
 
+export async function speakWithPreferredVoice(
+  text: string,
+  remoteSpeak: (text: string) => Promise<void>,
+  browserSpeak: (text: string) => Promise<void>,
+): Promise<"remote" | "browser" | "none"> {
+  const cleaned = text.trim();
+  if (!cleaned) return "none";
+
+  try {
+    await remoteSpeak(cleaned);
+    return "remote";
+  } catch {
+    await browserSpeak(cleaned);
+    return "browser";
+  }
+}
+
+export function playSpeechBlob(blob: Blob): Promise<void> {
+  if (
+    typeof Audio === "undefined" ||
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function"
+  ) {
+    return Promise.reject(new Error("当前浏览器不支持音频播放"));
+  }
+
+  cancelSpeechAudio();
+  const objectUrl = URL.createObjectURL(blob);
+  const audio = new Audio(objectUrl);
+  activeSpeechAudio = audio;
+  activeSpeechAudioUrl = objectUrl;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (activeSpeechAudio === audio) {
+        activeSpeechAudio = null;
+        activeSpeechAudioUrl = "";
+      }
+      URL.revokeObjectURL(objectUrl);
+      if (error) reject(error);
+      else resolve();
+    };
+
+    audio.onended = () => finish();
+    audio.onerror = () => finish(new Error("语音音频播放失败"));
+    const playResult = audio.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch((error) => finish(error));
+    }
+  });
+}
+
 export function selectChineseVoice(voices: SpeechVoiceLike[]): SpeechVoiceLike | undefined {
   return voices
     .map((voice, index) => ({ voice, index, score: chineseVoiceScore(voice) }))
@@ -305,4 +416,18 @@ function speakSegment(
 export function cancelSpeech(environment?: VoiceEnvironment): void {
   const target = (environment ?? (typeof window !== "undefined" ? window : {})) as VoiceEnvironment;
   target.speechSynthesis?.cancel();
+  cancelSpeechAudio();
+}
+
+function cancelSpeechAudio(): void {
+  const audio = activeSpeechAudio;
+  if (audio) {
+    audio.pause();
+    audio.src = "";
+  }
+  if (activeSpeechAudioUrl && typeof URL !== "undefined") {
+    URL.revokeObjectURL(activeSpeechAudioUrl);
+  }
+  activeSpeechAudio = null;
+  activeSpeechAudioUrl = "";
 }

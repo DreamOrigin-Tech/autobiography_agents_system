@@ -4,10 +4,28 @@ import test from "node:test";
 import {
   initialVoiceState,
   prepareSpeechSegments,
+  selectAudioRecordingMimeType,
   selectChineseVoice,
+  speakWithPreferredVoice,
   voiceErrorMessage,
   voiceReducer,
+  getVoiceSupport,
 } from "./voice.ts";
+
+class FakeMediaRecorder {
+  state = "inactive" as const;
+  ondataavailable = null;
+  onerror = null;
+  onstop = null;
+
+  static isTypeSupported(type: string) {
+    return type === "audio/webm;codecs=opus";
+  }
+
+  start() {}
+
+  stop() {}
+}
 
 test("voice selection prefers a natural mainland Mandarin voice", () => {
   const cantonese = { name: "Sin-Ji", lang: "zh-HK", localService: true };
@@ -37,13 +55,17 @@ test("voice conversation moves from prompt to listening to submission and back",
   assert.equal(listening.phase, "listening");
 
   const submitting = voiceReducer(listening, {
-    type: "final-transcript",
+    type: "transcript-ready",
     transcript: "我记得那年冬天很冷。",
   });
-  assert.equal(submitting.phase, "submitting");
+  assert.equal(submitting.phase, "reviewing");
   assert.equal(submitting.transcript, "我记得那年冬天很冷。");
 
-  const replying = voiceReducer(submitting, { type: "submit-succeeded" });
+  const sending = voiceReducer(submitting, { type: "submit-started" });
+  assert.equal(sending.phase, "submitting");
+  assert.equal(sending.transcript, "我记得那年冬天很冷。");
+
+  const replying = voiceReducer(sending, { type: "submit-succeeded" });
   assert.equal(replying.phase, "speaking");
   assert.equal(replying.transcript, "");
 });
@@ -75,4 +97,73 @@ test("permission errors use an actionable Chinese explanation", () => {
   assert.match(voiceErrorMessage("not-allowed"), /麦克风权限/);
   assert.match(voiceErrorMessage("audio-capture"), /麦克风/);
   assert.match(voiceErrorMessage("network"), /网络/);
+});
+
+test("voice support allows backend ASR recording without browser speech recognition", () => {
+  const support = getVoiceSupport({
+    speechSynthesis: { getVoices: () => [], speak: () => {}, cancel: () => {} },
+    SpeechSynthesisUtterance: class {
+      lang = "";
+      rate = 1;
+      pitch = 1;
+      volume = 1;
+      voice = null;
+      onend = null;
+      onerror = null;
+    },
+    MediaRecorder: FakeMediaRecorder,
+    mediaDevices: {
+      getUserMedia: async () => ({}),
+    },
+  });
+
+  assert.equal(support.recognition, false);
+  assert.equal(support.recording, true);
+  assert.equal(support.supported, true);
+});
+
+test("audio recording mime type prefers webm opus when available", () => {
+  const mimeType = selectAudioRecordingMimeType({
+    MediaRecorder: FakeMediaRecorder,
+  });
+
+  assert.equal(mimeType, "audio/webm;codecs=opus");
+});
+
+test("preferred voice uses remote speech before browser fallback", async () => {
+  const calls: string[] = [];
+
+  const result = await speakWithPreferredVoice(
+    "请讲讲那时候的一个画面。",
+    async (text) => {
+      calls.push(`remote:${text}`);
+    },
+    async (text) => {
+      calls.push(`browser:${text}`);
+    },
+  );
+
+  assert.equal(result, "remote");
+  assert.deepEqual(calls, ["remote:请讲讲那时候的一个画面。"]);
+});
+
+test("preferred voice falls back to browser speech when remote speech fails", async () => {
+  const calls: string[] = [];
+
+  const result = await speakWithPreferredVoice(
+    "请讲讲那时候的一个画面。",
+    async (text) => {
+      calls.push(`remote:${text}`);
+      throw new Error("remote unavailable");
+    },
+    async (text) => {
+      calls.push(`browser:${text}`);
+    },
+  );
+
+  assert.equal(result, "browser");
+  assert.deepEqual(calls, [
+    "remote:请讲讲那时候的一个画面。",
+    "browser:请讲讲那时候的一个画面。",
+  ]);
 });

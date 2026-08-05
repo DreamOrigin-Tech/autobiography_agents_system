@@ -61,4 +61,8 @@ async def health():
         "dev_auth_bypass": settings.dev_auth_bypass,
         "wechat_login_enabled": settings.wechat_login_enabled,
         "password_login_enabled": bool(settings.access_password),
+        "tts_model": settings.tts_model,
+        "tts_configured": bool(settings.effective_dashscope_api_key and settings.tts_voice.strip()),
+        "asr_model": settings.asr_model,
+        "asr_configured": bool(settings.effective_dashscope_api_key),
     }

@@ -19,7 +19,8 @@ INTERVIEWER_SYSTEM = """你是一位善于倾听的自传采访记者。你不�
 6. 不重复已经问过的问题。每 2-3 轮可以自然过渡到另一个话题，但要有一句衔接。
 7. 第一次见面时，先用 1-2 句自然寒暄，让作者知道可以慢慢说、记不清也没关系，再从一个画面、一个人或一件小事轻轻切入。后续章节承接前文，不要重复正式问候。
 8. 后台的“完成度、缺失维度、覆盖度”等只用于你选择方向，绝不能在回复里提到这些词。
-9. 当素材已经足够撰写时，可以自然收束，例如“这段故事已经很清楚了，我们可以先把它写下来”。
+9. 当素材已经足够撰写时，可以自然收束，例如“这段故事已经很清楚了，我们可以先把它写下来”。对标出版级传记章节时，通常至少需要 12 轮有内容的回答、约 5000 字素材，并覆盖 5-10 个具体场景；不要太早建议写作。
+10. 不要把你自己知道的公开资料、新人物、新年份、新数字、新事件塞进问题里。只能追问作者刚刚提到的线索，或用“这段如果要写清楚，还缺哪一个具体场景？”这类方式请作者补充。
 
 输出 JSON：
 {
@@ -95,10 +96,19 @@ async def generate_question(
         return result
     except Exception as exc:
         logger.warning("LLM interview question failed, using fallback: %s", exc)
+        user_answers = [
+            m.get("content", "").strip()
+            for m in messages
+            if m.get("role") == "user" and m.get("content", "").strip()
+        ]
+        has_publish_level_material = (
+            len(user_answers) >= 12
+            and sum(len(answer) for answer in user_answers) >= 5000
+        )
         return {
             "question": fallback_question,
             "intent": "追问细节",
-            "suggested_action": "continue" if len(messages) < 10 else "write_chapter",
+            "suggested_action": "write_chapter" if has_publish_level_material else "continue",
             "reason": "fallback question",
         }
 
@@ -147,7 +157,7 @@ def _opening_question(chapter_title: str, chapter_summaries: list[str]) -> str:
 def _normalize_interview_turn(text: str, fallback: str) -> str:
     normalized = re.sub(r"^(?:问题|采访问题|记者回复)[：:\s]+", "", text.strip())
     normalized = re.sub(r"\s+", " ", normalized)
-    forbidden_jargon = ("缺失维度", "完成度", "覆盖度", "下一轮优先补充")
+    forbidden_jargon = ("缺失维度", "完成度", "覆盖度", "下一轮优先补充", "我听说", "公开资料")
     question_marks = normalized.count("？") + normalized.count("?")
 
     if (

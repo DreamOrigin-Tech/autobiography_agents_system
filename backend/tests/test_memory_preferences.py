@@ -53,18 +53,21 @@ def test_ai_draft_requires_enough_interview_material():
         {"role": "agent", "content": "请讲讲童年。"},
         {"role": "user", "content": "我小时候住在平房。"},
     ]
+    long_answer = (
+        "我小时候住在抚顺矿区的平房里，冬天火炕很热，窗户上有冰花，母亲会把冻梨放在窗台上。"
+        "父亲在矿上倒班，夜班回来时脸上总有煤灰，他不太说辛苦，只把饭盒放在桌上。"
+        "邻居之间来往很多，谁家炖菜整条巷子都闻得到，孩子们放学后在巷子里抽冰尜、踢毽子。"
+        "我记得煤炉上的水壶声、墙角挂着的工作服、门口沾着雪泥的棉鞋，也记得母亲把补过的衣服叠得很平整。"
+        "这些日常后来让我理解普通人的生活尊严：不是把童年写成苦难展示，而是写出人在有限条件里保留秩序、骄傲和温柔。"
+        "如果写成自传章节，我希望保留这种普通感，让读者看见一个人如何从日常里长出来，而不是一开始就被写成已经完成的人。"
+    ) * 3
     enough_messages = [
-        {"role": "agent", "content": "请讲讲童年。"},
-        {"role": "user", "content": "我小时候住在抚顺矿区的平房里，冬天火炕很热，母亲会把冻梨放在窗台上。"},
-        {"role": "agent", "content": "还有什么细节？"},
-        {
-            "role": "user",
-            "content": (
-                "父亲在矿上倒班，家里常有煤灰味。邻居之间来往很多，谁家炖菜整条巷子都闻得到，"
-                "我最记得这些寻常日子。冬天放学后我们会在巷子里抽冰尜、踢毽子，玩到帽子上都是霜，"
-                "回屋一坐到火炕上，整个人才慢慢缓过来。"
-            ),
-        },
+        item
+        for idx in range(12)
+        for item in (
+            {"role": "agent", "content": f"请讲讲第 {idx + 1} 个具体画面。"},
+            {"role": "user", "content": f"第 {idx + 1} 个画面里，{long_answer}"},
+        )
     ]
 
     assert chapter_service.has_enough_material_for_ai_draft(short_messages) is False
@@ -96,6 +99,30 @@ def test_chapter_coverage_reports_missing_dimensions():
     assert coverage["max_score"] == 5
     assert "感受/影响" in coverage["missing_dimensions"]
     assert "下一轮" in coverage["next_suggestion"] or "请继续" in coverage["next_suggestion"]
+
+
+def test_topic_coverage_matches_question_anchors_not_full_sentences():
+    topics = [
+        "请描述你第一次意识到自己被收养的情境，以及保罗和克拉拉如何解释这件事。",
+        "在车库的工作台上，你父亲是如何教你‘即使看不见的部分也要做好’的？",
+        "你最早对电子学产生兴趣是在什么时候？当时你身边有哪些早期硅谷工程师邻居？",
+    ]
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                "我六七岁时知道自己是被收养的，后来去问 Paul 和 Clara。"
+                "Paul 在车库里教我做柜子，背面看不见也要做好。"
+                "附近有 HP 工程师，硅谷的电子学空气让我觉得机器可以被拆开。"
+            ),
+        }
+    ]
+
+    coverage = memory.topic_coverage_summary(topics, messages)
+
+    assert coverage["topics"][0]["status"] != "untouched"
+    assert coverage["topics"][1]["status"] == "covered"
+    assert coverage["topics"][2]["status"] == "covered"
 
 
 def test_chapter_quality_report_flags_privacy_and_invention_risks():
@@ -228,6 +255,51 @@ async def test_submit_answer_asks_for_details_when_answer_is_shallow(monkeypatch
     assert messages[-1].content == result["question"]
 
 
+@pytest.mark.asyncio
+async def test_submit_answer_treats_test_phrase_as_meta_input(monkeypatch):
+    await init_db()
+    llm_called = False
+
+    async def fake_generate_question(*_args, **_kwargs):
+        nonlocal llm_called
+        llm_called = True
+        return {
+            "question": "这条问题不应该出现",
+            "intent": "追问细节",
+            "suggested_action": "continue",
+            "reason": "test",
+        }
+
+    monkeypatch.setattr(interview_service, "generate_question", fake_generate_question)
+
+    async with async_session() as db:
+        project = await create_test_project(db, "追问测试", "第一人称")
+        chapter = Chapter(
+            project_id=project.id,
+            order=1,
+            title="求学路",
+            interview_topics='["老师和同学"]',
+        )
+        db.add(chapter)
+        await db.commit()
+        await db.refresh(chapter)
+
+        result = await interview_service.submit_answer(
+            db,
+            chapter,
+            "你好，我们来试一下新的千问语音模型。",
+        )
+        session = await interview_service.get_or_create_session(db, project, chapter)
+        messages = await interview_service.get_session_messages(db, session.id)
+
+    assert llm_called is False
+    assert result["intent"] == "追问细节"
+    assert "先不算正式采访" in result["question"]
+    assert "具体画面" in result["question"]
+    assert messages[-1].role == "agent"
+    assert messages[-1].content == result["question"]
+
+
 def test_detail_followup_respects_a_request_to_skip():
     question = memory.detail_followup_question(
         "这段我不太方便说，先跳过吧。",
@@ -249,6 +321,18 @@ def test_detail_followup_helps_recall_without_demanding_exact_facts():
 
     assert "记不清也很正常" in question
     assert "一个人、一个地方，还是一句话" in question
+    assert question.count("？") == 1
+
+
+def test_detail_followup_handles_test_or_greeting_text():
+    question = memory.detail_followup_question(
+        "你好，我们来试一下新的千问语音模型。",
+        "童年",
+        ["家庭环境"],
+    )
+
+    assert "先不算正式采访" in question
+    assert "具体画面" in question
     assert question.count("？") == 1
 
 

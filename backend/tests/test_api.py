@@ -7,6 +7,7 @@ from app.db.session import init_db
 from app.main import app
 from app.models import Chapter, ChapterStatus, InterviewSession, Project, ProjectStatus
 from app.schemas import OutlineChapterPlan
+from app.agents import interview_assistant
 from app.services import interview_service, outline_interview_service, project_service
 from conftest import login_test_user
 
@@ -248,6 +249,55 @@ async def test_chapter_coverage_endpoint_reports_missing_dimensions():
         assert data["percent"] == 0
         assert "时间" in data["missing_dimensions"]
         assert data["next_suggestion"]
+
+
+@pytest.mark.asyncio
+async def test_interview_assistant_records_live_interview_turns(monkeypatch):
+    async def fake_assistant_brief(_title, _topics, _messages, _coverage_context=None):
+        return {
+            "next_questions": ["您刚才说到母亲，当时她具体做了什么？"],
+            "followup_focus": ["母亲的动作", "当时地点"],
+            "missing_facts": ["时间", "地点"],
+            "live_summary": "已经出现关键人物，可以顺着动作追问。",
+            "caution": "一次只问一件事。",
+            "suggested_action": "continue",
+            "reason": "test",
+        }
+
+    monkeypatch.setattr(interview_service, "generate_assistant_brief", fake_assistant_brief)
+    monkeypatch.setattr(interview_assistant, "generate_assistant_brief", fake_assistant_brief)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await login_test_user(client)
+        create_res = await client.post("/api/projects", json={"title": "助理模式测试"})
+        project_id = create_res.json()["id"]
+        await client.post(
+            f"/api/projects/{project_id}/plan",
+            json={"author_background": "测试作者"},
+        )
+        project = (await client.get(f"/api/projects/{project_id}")).json()
+        chapter_id = project["chapters"][0]["id"]
+
+        interviewer_res = await client.post(
+            f"/api/chapters/{chapter_id}/interview/assistant/record",
+            json={"role": "interviewer", "content": "您小时候和母亲最常一起做什么？"},
+        )
+        assert interviewer_res.status_code == 200
+        assert interviewer_res.json()["transcript_stats"]["interviewer_turns"] == 1
+
+        user_res = await client.post(
+            f"/api/chapters/{chapter_id}/interview/assistant/record",
+            json={"role": "user", "content": "母亲常带我去河边洗衣服，我在旁边捡石头。"},
+        )
+        assert user_res.status_code == 200
+        data = user_res.json()
+        assert data["next_questions"] == ["您刚才说到母亲，当时她具体做了什么？"]
+        assert data["transcript_stats"]["interviewee_turns"] == 1
+        assert data["chapter_coverage"]["score"] >= 1
+
+        messages = (await client.get(f"/api/chapters/{chapter_id}/interview/messages")).json()
+        assert [message["role"] for message in messages] == ["interviewer", "user"]
 
 
 @pytest.mark.asyncio

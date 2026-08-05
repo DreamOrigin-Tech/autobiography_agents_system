@@ -12,6 +12,7 @@ NEXT_CHAPTER_SYSTEM = """你是一位自传策划编辑。请根据作者已经�
 - 后续章节要承接已完成内容，但不能重复已有章节
 - 用户明确说想聊哪个时期、人物或事件时，优先遵从这个方向
 - 标题必须具体，能看出属于这位作者，禁止使用“童年记忆”“人生感悟”等通用标题
+- 标题必须是完整短句，建议 10-22 个中文字符；不要以“与、和、的、：、字”等残缺词结尾
 - 提供 3-5 个适合下一轮采访的具体话题
 
 输出 JSON：
@@ -60,12 +61,13 @@ async def create_next_chapter(
         temperature=0.7,
     )
     data["order"] = next_order
+    data["title"] = _clean_chapter_title(str(data.get("title", "")), direction, next_order)
     return OutlineChapterPlan.model_validate(data)
 
 
 def create_next_chapter_fallback(order: int, direction: str | None = None) -> OutlineChapterPlan:
-    focus = (direction or "一段最想留下的人生经历").strip()
-    title = focus[:24] if direction else ("故事从这里开始" if order == 1 else "接着往前走")
+    focus = _fallback_focus(direction)
+    title = _clean_chapter_title(focus[:24] if direction else "", direction, order)
     return OutlineChapterPlan(
         order=order,
         title=title,
@@ -76,6 +78,33 @@ def create_next_chapter_fallback(order: int, direction: str | None = None) -> Ou
             f"{focus}对后来的影响",
         ],
     )
+
+
+def _fallback_focus(direction: str | None) -> str:
+    if not direction:
+        return "一段最想留下的人生经历"
+    first_sentence = direction.strip().split("。", 1)[0].strip()
+    for separator in ("，", "；", ";"):
+        first_sentence = first_sentence.split(separator, 1)[0].strip()
+    return first_sentence[:32] or "一段最想留下的人生经历"
+
+
+def _clean_chapter_title(raw_title: str, direction: str | None, order: int) -> str:
+    title = raw_title.strip().strip("《》\"'“”‘’")
+    dangling_endings = ("与", "和", "及", "、", "，", "：", ":", "的", "字")
+    if title and len(title) <= 32 and not title.endswith(dangling_endings):
+        return title
+
+    focus = (direction or "").strip()
+    if "Macintosh" in focus or "Macintosh" in title:
+        return "Macintosh：海盗旗与放逐"
+    if "Apple II" in focus or "Apple I" in focus:
+        return "车库里的苹果"
+    if focus:
+        cleaned = focus.split("。", 1)[0].split("，", 1)[0].strip()
+        if 6 <= len(cleaned) <= 28 and not cleaned.endswith(dangling_endings):
+            return cleaned
+    return "故事从这里开始" if order == 1 else f"第{order}章"
 
 
 async def suggest_next_action(

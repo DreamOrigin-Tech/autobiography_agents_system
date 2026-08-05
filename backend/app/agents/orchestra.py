@@ -122,7 +122,7 @@ class Orchestra:
         user_rounds = memory.count_user_rounds(messages)
 
         suggested_action = "continue"
-        if user_rounds >= 5 and coverage["total_chars"] > 500:
+        if user_rounds >= 12 and coverage["total_chars"] >= 5000:
             suggested_action = "write_chapter"
 
         return {
@@ -131,7 +131,7 @@ class Orchestra:
             "user_rounds": user_rounds,
             "suggested_action": suggested_action,
             "suggestion": (
-                "素材已较充分，可以开始写作" if suggested_action == "write_chapter"
+                "素材已较充分，可以开始写出版级传记章节" if suggested_action == "write_chapter"
                 else f"还有 {len(unanswered)} 个话题未覆盖，建议追问"
             ),
         }

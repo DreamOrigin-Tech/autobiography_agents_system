@@ -5,7 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.agents.book_designer import design_book_layout
 from app.models import Chapter, ChapterStatus, Project
+from app.services.book_pdf import BookChapter, BookPdfData, build_book_pdf
 
 
 def _new_share_token() -> str:
@@ -124,3 +126,46 @@ def to_published_view(project: Project) -> dict:
             for ch in chapters
         ],
     }
+
+
+async def export_project_pdf(db: AsyncSession, project: Project) -> tuple[bytes, str]:
+    readiness = await publish_readiness(db, project)
+    if not readiness["ready"]:
+        raise ValueError(str(readiness["message"]))
+
+    result = await db.execute(
+        select(Chapter).where(Chapter.project_id == project.id).order_by(Chapter.order)
+    )
+    chapters = [
+        chapter
+        for chapter in result.scalars().all()
+        if chapter.status == ChapterStatus.DONE and chapter.content_md
+    ]
+    layout = await design_book_layout(
+        project.title,
+        [{"order": chapter.order, "title": chapter.title} for chapter in chapters],
+        project.style_notes,
+        project.preference_notes,
+    )
+    pdf_bytes = build_book_pdf(
+        BookPdfData(
+            title=project.title,
+            style_notes=project.style_notes,
+            chapters=[
+                BookChapter(
+                    order=chapter.order,
+                    title=chapter.title,
+                    content_md=chapter.content_md or "",
+                )
+                for chapter in chapters
+            ],
+        ),
+        layout,
+    )
+    return pdf_bytes, _safe_pdf_filename(project.title)
+
+
+def _safe_pdf_filename(title: str) -> str:
+    cleaned = "".join(ch for ch in title.strip() if ch not in '\\/:*?"<>|')
+    cleaned = cleaned or "autobiography"
+    return f"{cleaned[:48]}.pdf"
