@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.agents.interview_assistant import generate_assistant_brief
+from app.agents.interview_assistant import classify_call_speaker, generate_assistant_brief
 from app.agents.interviewer import generate_question, parse_topics
 from app.agents.memory import memory
 from app.models import (
@@ -16,6 +16,7 @@ from app.models import (
     Project,
     ProjectStatus,
 )
+from app.services import asr_service
 from app.services.chapter_service import chapter_coverage
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,43 @@ async def record_assistant_turn(
     brief["session_id"] = session.id
     brief["chapter_coverage"] = coverage
     brief["transcript_stats"] = _assistant_transcript_stats(msg_dicts)
+    return brief
+
+
+async def record_call_audio_turn(
+    db: AsyncSession,
+    chapter: Chapter,
+    audio_bytes: bytes,
+    mime_type: str,
+) -> dict:
+    project_result = await db.execute(select(Project).where(Project.id == chapter.project_id))
+    project = project_result.scalar_one()
+    session = await get_or_create_session(db, project, chapter)
+    text = (await asr_service.transcribe_audio_bytes(audio_bytes, mime_type)).strip()
+    if not text:
+        raise ValueError("这段录音没有识别出文字")
+
+    messages = await get_session_messages(db, session.id)
+    msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+    classification = await classify_call_speaker(text, msg_dicts)
+    role = classification.get("role", "user")
+    if role not in {"user", "interviewer", "note"}:
+        role = "user"
+
+    await add_message(db, session, role, text)
+    updated_messages = await get_session_messages(db, session.id)
+    updated_dicts = [{"role": m.role, "content": m.content} for m in updated_messages]
+    topics = parse_topics(chapter.interview_topics)
+    coverage = chapter_coverage(updated_dicts)
+    coverage_context = _coverage_prompt_context(coverage)
+    brief = await generate_assistant_brief(chapter.title, topics, updated_dicts, coverage_context)
+    brief["session_id"] = session.id
+    brief["chapter_coverage"] = coverage
+    brief["transcript_stats"] = _assistant_transcript_stats(updated_dicts)
+    brief["transcript"] = text
+    brief["detected_role"] = role
+    brief["role_confidence"] = classification.get("confidence", 0.0)
+    brief["role_reason"] = classification.get("reason", "")
     return brief
 
 

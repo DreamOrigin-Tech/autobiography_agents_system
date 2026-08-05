@@ -37,6 +37,7 @@ from app.schemas import (
     EditPreviewResponse,
     EditRequest,
     InterviewAnswerRequest,
+    InterviewAssistantCallAudioRequest,
     InterviewAssistantRequest,
     InterviewAssistantResponse,
     InterviewMessageSchema,
@@ -518,6 +519,32 @@ async def record_interview_assistant_turn(
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
     return await interview_service.record_assistant_turn(db, chapter, body.role, body.content)
+
+
+@router.post(
+    "/chapters/{chapter_id}/interview/assistant/call-audio",
+    response_model=InterviewAssistantResponse,
+)
+async def record_interview_assistant_call_audio(
+    chapter_id: str,
+    body: InterviewAssistantCallAudioRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rate_limit_llm(request)
+    chapter = await chapter_service.get_chapter(db, chapter_id, current_user.id)
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    try:
+        audio = asr_service.decode_audio_base64(body.audio_base64)
+        return await interview_service.record_call_audio_turn(db, chapter, audio, body.mime_type)
+    except asr_service.ASRConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except asr_service.ASRTranscriptionError as exc:
+        raise HTTPException(status_code=502, detail="语音识别服务暂时不可用") from exc
 
 
 @router.get("/chapters/{chapter_id}/interview/stream")

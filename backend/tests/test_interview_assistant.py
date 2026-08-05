@@ -32,6 +32,20 @@ def test_fallback_assistant_brief_uses_publish_level_material_gate():
     assert ready["suggested_action"] == "write_chapter"
 
 
+def test_fallback_speaker_classification_detects_interviewer_and_interviewee():
+    interviewer = interview_assistant.fallback_speaker_classification(
+        "您刚才说父亲很沉默，能不能讲讲那天晚上具体发生了什么？"
+    )
+    interviewee = interview_assistant.fallback_speaker_classification(
+        "我记得那天晚上父亲坐在门口，手里拿着饭盒，我当时不知道该说什么。"
+    )
+    note = interview_assistant.fallback_speaker_classification("测试一下麦克风")
+
+    assert interviewer["role"] == "interviewer"
+    assert interviewee["role"] == "user"
+    assert note["role"] == "note"
+
+
 @pytest.mark.asyncio
 async def test_generate_assistant_brief_filters_internal_jargon(monkeypatch):
     async def fake_llm_complete_json(*_args, **_kwargs):

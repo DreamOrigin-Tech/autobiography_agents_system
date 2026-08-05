@@ -143,6 +143,10 @@ export interface InterviewAssistantResponse {
     note_turns: number;
     interviewee_chars: number;
   };
+  transcript?: string | null;
+  detected_role?: InterviewAssistantRole | null;
+  role_confidence?: number | null;
+  role_reason?: string | null;
 }
 
 export interface AnswerQuality {

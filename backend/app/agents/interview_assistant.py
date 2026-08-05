@@ -74,6 +74,88 @@ async def generate_assistant_brief(
     return normalized
 
 
+async def classify_call_speaker(
+    text: str,
+    recent_messages: list[dict[str, str]],
+) -> dict:
+    fallback = fallback_speaker_classification(text)
+    if fallback["confidence"] >= 0.78:
+        return fallback
+
+    history = "\n".join(
+        f"{m.get('role', '')}：{m.get('content', '')}"
+        for m in recent_messages[-12:]
+    )
+    try:
+        result = await llm_complete_json(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "你在帮助自传采访系统判断一段语音转写是谁说的。"
+                        "只能输出 JSON。role 必须是 user、interviewer 或 note。"
+                        "user=受访者/自传主人公在讲自己的经历；"
+                        "interviewer=采访员在提问、追问、回应或控场；"
+                        "note=旁白、环境说明、无效录音、系统说明。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"""近期记录：
+{history or '（暂无）'}
+
+待判断文本：
+{text}
+
+请输出：
+{{"role":"user|interviewer|note","confidence":0到1,"reason":"一句话理由"}}""",
+                },
+            ],
+            temperature=0.2,
+        )
+    except Exception:
+        return fallback
+
+    role = result.get("role")
+    if role not in {"user", "interviewer", "note"}:
+        role = fallback["role"]
+    try:
+        confidence = float(result.get("confidence", fallback["confidence"]))
+    except (TypeError, ValueError):
+        confidence = fallback["confidence"]
+    return {
+        "role": role,
+        "confidence": max(0.0, min(1.0, confidence)),
+        "reason": _clean_text(result.get("reason"), fallback["reason"], 80),
+    }
+
+
+def fallback_speaker_classification(text: str) -> dict:
+    cleaned = " ".join(str(text or "").strip().split())
+    if not cleaned:
+        return {"role": "note", "confidence": 1.0, "reason": "空白录音"}
+
+    interviewer_markers = (
+        "请问", "能不能", "能否", "可以讲讲", "你刚才", "您刚才", "接着说",
+        "为什么", "什么时候", "在哪里", "谁", "什么感受", "还有吗", "我们先",
+        "这个地方", "这段如果", "我想追问", "你能", "您能",
+    )
+    first_person_markers = (
+        "我记得", "我当时", "我觉得", "我后来", "我们家", "我的父亲", "我的母亲",
+        "我和", "那时候我", "对我来说", "我希望", "我不想", "我最",
+    )
+    note_markers = ("测试", "试一下", "听得到吗", "麦克风", "录音", "系统", "旁白")
+
+    question_like = "?" in cleaned or "？" in cleaned
+    if any(marker in cleaned for marker in note_markers) and len(cleaned) < 40:
+        return {"role": "note", "confidence": 0.82, "reason": "更像测试或环境说明"}
+    if question_like or any(marker in cleaned for marker in interviewer_markers):
+        return {"role": "interviewer", "confidence": 0.74, "reason": "包含提问或追问语气"}
+    if any(marker in cleaned for marker in first_person_markers) or len(cleaned) >= 80:
+        return {"role": "user", "confidence": 0.72, "reason": "包含第一人称经历叙述"}
+    return {"role": "user", "confidence": 0.55, "reason": "默认按受访者素材记录"}
+
+
 def fallback_assistant_brief(
     chapter_title: str,
     interview_topics: list[str],

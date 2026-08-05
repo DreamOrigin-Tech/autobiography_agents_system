@@ -345,6 +345,21 @@ export const api = {
       timeoutMs: AI_REQUEST_TIMEOUT_MS,
     }),
 
+  recordInterviewCallAudio: async (chapterId: string, audio: Blob) => {
+    const audioBase64 = await blobToBase64(audio);
+    return request<InterviewAssistantResponse>(
+      `/chapters/${chapterId}/interview/assistant/call-audio`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          audio_base64: audioBase64,
+          mime_type: audio.type || "audio/webm",
+        }),
+        timeoutMs: ASR_REQUEST_TIMEOUT_MS + AI_REQUEST_TIMEOUT_MS,
+      },
+    );
+  },
+
   synthesizeSpeech: (text: string) =>
     requestBlob("/tts", {
       method: "POST",

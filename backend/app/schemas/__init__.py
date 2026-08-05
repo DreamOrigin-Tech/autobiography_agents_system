@@ -173,6 +173,11 @@ class InterviewAssistantRequest(BaseModel):
     role: str = Field(default="user", pattern="^(user|interviewer|note)$")
 
 
+class InterviewAssistantCallAudioRequest(BaseModel):
+    audio_base64: str = Field(min_length=1, max_length=10_000_000)
+    mime_type: str = Field(min_length=1, max_length=100)
+
+
 class InterviewAssistantResponse(BaseModel):
     next_questions: list[str]
     followup_focus: list[str]
@@ -184,6 +189,10 @@ class InterviewAssistantResponse(BaseModel):
     session_id: str
     chapter_coverage: dict
     transcript_stats: dict
+    transcript: str | None = None
+    detected_role: str | None = None
+    role_confidence: float | None = None
+    role_reason: str | None = None
 
 
 class TtsRequest(BaseModel):
