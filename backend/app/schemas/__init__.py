@@ -136,6 +136,76 @@ class PublishReadinessResponse(BaseModel):
     chapters: list[PublishReadinessChapter]
 
 
+class CommunityUser(BaseModel):
+    id: str
+    name: str
+    avatar_url: str | None = None
+
+
+class CommunityCommentCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=2000)
+
+
+class CommunityCommentResponse(BaseModel):
+    id: str
+    post_id: str
+    author: CommunityUser
+    content: str
+    created_at: datetime
+
+
+class CommunityPostResponse(BaseModel):
+    id: str
+    project_id: str
+    title: str
+    excerpt: str | None = None
+    author: CommunityUser
+    share_token: str
+    published_at: datetime | None = None
+    chapter_count: int
+    comment_count: int
+    follower_count: int
+    is_following_author: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
+class CommunityPostDetail(CommunityPostResponse):
+    comments: list[CommunityCommentResponse] = Field(default_factory=list)
+
+
+class CommunityPublishResponse(BaseModel):
+    post: CommunityPostResponse
+    message: str
+
+
+class FollowStatusResponse(BaseModel):
+    user: CommunityUser
+    follower_count: int
+    following_count: int
+    is_following: bool = False
+
+
+class DirectMessageCreate(BaseModel):
+    recipient_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class DirectMessageResponse(BaseModel):
+    id: str
+    sender: CommunityUser
+    recipient: CommunityUser
+    content: str
+    read_at: datetime | None = None
+    created_at: datetime
+
+
+class ConversationSummary(BaseModel):
+    user: CommunityUser
+    last_message: DirectMessageResponse
+    unread_count: int
+
+
 class PlanRequest(BaseModel):
     author_background: str = Field(
         default="",

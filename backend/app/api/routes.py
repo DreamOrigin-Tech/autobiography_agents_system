@@ -33,6 +33,14 @@ from app.schemas import (
     ChapterManualUpdate,
     ChapterCoverageResponse,
     ChapterQualityResponse,
+    CommunityCommentCreate,
+    CommunityCommentResponse,
+    CommunityPostDetail,
+    CommunityPostResponse,
+    CommunityPublishResponse,
+    ConversationSummary,
+    DirectMessageCreate,
+    DirectMessageResponse,
     EditApplyRequest,
     EditPreviewResponse,
     EditRequest,
@@ -55,12 +63,14 @@ from app.schemas import (
     PublishResponse,
     RevisionSchema,
     TtsRequest,
+    FollowStatusResponse,
     WriteReadinessResponse,
 )
 from app.services import (
     chapter_service,
     asr_service,
     book_refine_service,
+    community_service,
     interview_service,
     outline_interview_service,
     project_service,
@@ -845,6 +855,27 @@ async def get_publish_readiness(
     return await publish_service.publish_readiness(db, project)
 
 
+@router.post("/projects/{project_id}/community/publish", response_model=CommunityPublishResponse)
+async def publish_project_to_community(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await project_service.get_project(db, project_id, current_user.id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    try:
+        post, created = await community_service.publish_project_to_community(
+            db, project, current_user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return CommunityPublishResponse(
+        post=post,
+        message="已发布到社区" if created else "社区帖子已更新",
+    )
+
+
 @router.post("/projects/{project_id}/refine/publish-level")
 async def refine_project_to_publish_level(
     project_id: str,
@@ -908,6 +939,123 @@ async def get_public_project(share_token: str, db: AsyncSession = Depends(get_db
     if not data["chapters"]:
         raise HTTPException(status_code=404, detail="暂无已发布内容")
     return data
+
+
+# ── Community ───────────────────────────────────────
+
+@router.get("/community/posts", response_model=list[CommunityPostResponse])
+async def list_community_posts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await community_service.list_posts(db, current_user.id)
+
+
+@router.get("/community/posts/{post_id}", response_model=CommunityPostDetail)
+async def get_community_post(
+    post_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    post = await community_service.get_post(db, post_id, current_user.id)
+    if not post:
+        raise HTTPException(status_code=404, detail="社区自传不存在")
+    return post
+
+
+@router.post(
+    "/community/posts/{post_id}/comments",
+    response_model=CommunityCommentResponse,
+)
+async def add_community_comment(
+    post_id: str,
+    body: CommunityCommentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    comment = await community_service.add_comment(db, post_id, current_user, body.content)
+    if not comment:
+        raise HTTPException(status_code=404, detail="社区自传不存在")
+    return comment
+
+
+@router.get("/community/users/{user_id}", response_model=FollowStatusResponse)
+async def get_community_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    status = await community_service.user_follow_status(db, user_id, current_user.id)
+    if not status:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return status
+
+
+@router.post("/community/users/{user_id}/follow", response_model=FollowStatusResponse)
+async def follow_community_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        await community_service.follow_user(db, current_user.id, user_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    status = await community_service.user_follow_status(db, user_id, current_user.id)
+    if not status:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return status
+
+
+@router.delete("/community/users/{user_id}/follow", response_model=FollowStatusResponse)
+async def unfollow_community_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await community_service.unfollow_user(db, current_user.id, user_id)
+    status = await community_service.user_follow_status(db, user_id, current_user.id)
+    if not status:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return status
+
+
+@router.get("/community/messages/conversations", response_model=list[ConversationSummary])
+async def list_message_conversations(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await community_service.list_conversations(db, current_user)
+
+
+@router.get("/community/messages/{user_id}", response_model=list[DirectMessageResponse])
+async def list_direct_message_thread(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await community_service.list_thread(db, current_user, user_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/community/messages", response_model=DirectMessageResponse)
+async def send_direct_message(
+    body: DirectMessageCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await community_service.send_message(
+            db, current_user, body.recipient_id, body.content
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ── Agent: Timeline ─────────────────────────────────

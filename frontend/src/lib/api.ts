@@ -2,7 +2,14 @@ import type {
   ChapterDetail,
   ChapterCoverage,
   ChapterQuality,
+  CommunityComment,
+  CommunityPost,
+  CommunityPostDetail,
+  CommunityPublishResponse,
+  ConversationSummary,
+  DirectMessage,
   EditPreview,
+  FollowStatus,
   InterviewMessage,
   InterviewAssistantResponse,
   InterviewAssistantRole,
@@ -435,6 +442,44 @@ export const api = {
 
   getPublicShare: (shareToken: string) =>
     request<PublishedProject>(`/public/share/${shareToken}`),
+
+  // Community
+  publishProjectToCommunity: (projectId: string) =>
+    request<CommunityPublishResponse>(`/projects/${projectId}/community/publish`, {
+      method: "POST",
+    }),
+
+  listCommunityPosts: () => request<CommunityPost[]>("/community/posts"),
+
+  getCommunityPost: (postId: string) =>
+    request<CommunityPostDetail>(`/community/posts/${postId}`),
+
+  addCommunityComment: (postId: string, content: string) =>
+    request<CommunityComment>(`/community/posts/${postId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    }),
+
+  getCommunityUser: (userId: string) =>
+    request<FollowStatus>(`/community/users/${userId}`),
+
+  followUser: (userId: string) =>
+    request<FollowStatus>(`/community/users/${userId}/follow`, { method: "POST" }),
+
+  unfollowUser: (userId: string) =>
+    request<FollowStatus>(`/community/users/${userId}/follow`, { method: "DELETE" }),
+
+  listConversations: () =>
+    request<ConversationSummary[]>("/community/messages/conversations"),
+
+  getMessageThread: (userId: string) =>
+    request<DirectMessage[]>(`/community/messages/${userId}`),
+
+  sendMessage: (recipientId: string, content: string) =>
+    request<DirectMessage>("/community/messages", {
+      method: "POST",
+      body: JSON.stringify({ recipient_id: recipientId, content }),
+    }),
 };
 
 export function getWeChatLoginUrl(nextPath = "/"): string {

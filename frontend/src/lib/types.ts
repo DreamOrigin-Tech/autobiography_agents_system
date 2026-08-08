@@ -107,6 +107,67 @@ export interface PublishReadiness {
   }>;
 }
 
+export interface CommunityUser {
+  id: string;
+  name: string;
+  avatar_url?: string | null;
+}
+
+export interface CommunityComment {
+  id: string;
+  post_id: string;
+  author: CommunityUser;
+  content: string;
+  created_at: string;
+}
+
+export interface CommunityPost {
+  id: string;
+  project_id: string;
+  title: string;
+  excerpt?: string | null;
+  author: CommunityUser;
+  share_token: string;
+  published_at?: string | null;
+  chapter_count: number;
+  comment_count: number;
+  follower_count: number;
+  is_following_author: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommunityPostDetail extends CommunityPost {
+  comments: CommunityComment[];
+}
+
+export interface CommunityPublishResponse {
+  post: CommunityPost;
+  message: string;
+}
+
+export interface FollowStatus {
+  user: CommunityUser;
+  follower_count: number;
+  following_count: number;
+  is_following: boolean;
+}
+
+export interface DirectMessage {
+  id: string;
+  sender: CommunityUser;
+  recipient: CommunityUser;
+  content: string;
+  read_at?: string | null;
+  created_at: string;
+}
+
+export interface ConversationSummary {
+  user: CommunityUser;
+  last_message: DirectMessage;
+  unread_count: number;
+}
+
 export interface InterviewMessage {
   id: string;
   role: string;

@@ -24,6 +24,7 @@ async def init_db() -> None:
         agent_run,
         auth_session,
         chapter,
+        community,
         interview,
         oauth_state,
         project,

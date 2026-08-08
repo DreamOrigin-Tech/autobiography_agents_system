@@ -22,6 +22,7 @@ export default function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [publishingCommunity, setPublishingCommunity] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -143,6 +144,20 @@ export default function ProjectSettingsPage() {
     }
   }
 
+  async function handlePublishCommunity() {
+    setPublishingCommunity(true);
+    setError("");
+    try {
+      const result = await api.publishProjectToCommunity(projectId);
+      toast(result.message, "success");
+      router.push(`/community/post/${result.post.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "发布到社区失败");
+    } finally {
+      setPublishingCommunity(false);
+    }
+  }
+
   async function handleDelete() {
     setDeleting(true);
     try {
@@ -245,6 +260,9 @@ export default function ProjectSettingsPage() {
                     <button type="button" onClick={handleCopyLink} className="btn-primary py-3 text-sm">{copied ? "已复制" : "复制链接"}</button>
                     <Link href={`/share/${project.share_token}`} target="_blank" className="btn-outline flex items-center justify-center py-3 text-sm">预览分享页</Link>
                   </div>
+                  <button type="button" onClick={handlePublishCommunity} disabled={publishingCommunity} className="btn-primary flex w-full items-center justify-center gap-2 py-3 text-sm disabled:opacity-50">
+                    <CommunityIcon /> {publishingCommunity ? "正在发布到社区..." : "发布到自传社区"}
+                  </button>
                   <div className="grid grid-cols-2 gap-2 border-t border-[#eaecf0] pt-3">
                     <button type="button" onClick={handlePublish} disabled={publishDisabled} className="rounded-xl border border-[#a7f3d0] py-2.5 text-sm font-medium text-[#0f9d73] transition hover:bg-[#ecfdf5] disabled:opacity-40">更新发布</button>
                     <button type="button" onClick={handleUnpublish} disabled={publishing} className="btn-outline py-2.5 text-sm">取消发布</button>
@@ -326,6 +344,10 @@ function SectionIntro({ icon, title, description }: { icon: React.ReactNode; tit
 
 function ArrowLeftIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>;
+}
+
+function CommunityIcon() {
+  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /><path d="M16 3.13a4 4 0 010 7.75" /></svg>;
 }
 
 function MemoryIcon() {
