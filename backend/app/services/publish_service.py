@@ -77,6 +77,7 @@ async def publish_readiness(db: AsyncSession, project: Project) -> dict:
             "title": chapter.title,
             "status": chapter.status,
             "quality_score": quality["score"],
+            "quality_max_score": quality["max_score"],
             "quality_status": quality["status"],
             "message": quality["message"],
             "risks": quality["risks"],

@@ -122,6 +122,7 @@ class PublishReadinessChapter(BaseModel):
     title: str
     status: str
     quality_score: int
+    quality_max_score: int
     quality_status: str
     message: str
     risks: list[str]
@@ -166,6 +167,7 @@ class CommunityPostResponse(BaseModel):
     comment_count: int
     follower_count: int
     is_following_author: bool = False
+    is_author_current_user: bool = False
     created_at: datetime
     updated_at: datetime
 

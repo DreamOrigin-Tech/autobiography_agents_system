@@ -92,6 +92,7 @@ async def post_to_response(
         "comment_count": await _comment_count(db, post.id),
         "follower_count": await _follower_count(db, post.user_id),
         "is_following_author": await is_following(db, current_user_id, post.user_id),
+        "is_author_current_user": current_user_id == post.user_id,
         "created_at": post.created_at,
         "updated_at": post.updated_at,
     }

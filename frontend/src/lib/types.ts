@@ -100,6 +100,7 @@ export interface PublishReadiness {
     title: string;
     status: string;
     quality_score: number;
+    quality_max_score: number;
     quality_status: "good" | "needs_review" | "risky";
     message: string;
     risks: string[];
@@ -133,6 +134,7 @@ export interface CommunityPost {
   comment_count: number;
   follower_count: number;
   is_following_author: boolean;
+  is_author_current_user: boolean;
   created_at: string;
   updated_at: string;
 }

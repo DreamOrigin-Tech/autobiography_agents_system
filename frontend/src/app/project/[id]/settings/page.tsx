@@ -15,6 +15,7 @@ export default function ProjectSettingsPage() {
   const projectId = params.id as string;
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [publishReadiness, setPublishReadiness] = useState<PublishReadiness | null>(null);
+  const [communityPostId, setCommunityPostId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [styleNotes, setStyleNotes] = useState("");
   const [preferenceNotes, setPreferenceNotes] = useState("");
@@ -32,12 +33,14 @@ export default function ProjectSettingsPage() {
 
   const load = useCallback(async () => {
     try {
-      const [data, readiness] = await Promise.all([
+      const [data, readiness, communityPosts] = await Promise.all([
         api.getProject(projectId),
         api.getPublishReadiness(projectId),
+        api.listCommunityPosts().catch(() => []),
       ]);
       setProject(data);
       setPublishReadiness(readiness);
+      setCommunityPostId(communityPosts.find((post) => post.project_id === projectId)?.id ?? null);
       setTitle(data.title);
       setStyleNotes(data.style_notes || "");
       setPreferenceNotes(data.preference_notes || "");
@@ -149,6 +152,7 @@ export default function ProjectSettingsPage() {
     setError("");
     try {
       const result = await api.publishProjectToCommunity(projectId);
+      setCommunityPostId(result.post.id);
       toast(result.message, "success");
       router.push(`/community/post/${result.post.id}`);
     } catch (e) {
@@ -240,7 +244,9 @@ export default function ProjectSettingsPage() {
                         <li key={chapter.chapter_id} className="rounded-lg border border-white/80 bg-white/75 px-3 py-2.5 text-xs">
                           <div className="flex items-center justify-between gap-2">
                             <span className="line-clamp-1 font-medium text-[#344054]">第{chapter.order}章 · {chapter.title}</span>
-                            <span className={qualityColor(chapter.quality_status)}>{chapter.quality_score}/5</span>
+                            <span className={qualityColor(chapter.quality_status)}>
+                              {chapter.quality_score}/{chapter.quality_max_score}
+                            </span>
                           </div>
                           {chapter.risks[0] && <p className="mt-1 line-clamp-2 leading-relaxed text-[#667085]">{chapter.risks[0]}</p>}
                         </li>
@@ -261,7 +267,7 @@ export default function ProjectSettingsPage() {
                     <Link href={`/share/${project.share_token}`} target="_blank" className="btn-outline flex items-center justify-center py-3 text-sm">预览分享页</Link>
                   </div>
                   <button type="button" onClick={handlePublishCommunity} disabled={publishingCommunity} className="btn-primary flex w-full items-center justify-center gap-2 py-3 text-sm disabled:opacity-50">
-                    <CommunityIcon /> {publishingCommunity ? "正在发布到社区..." : "发布到自传社区"}
+                    <CommunityIcon /> {publishingCommunity ? "正在同步社区..." : communityPostId ? "更新社区发布" : "发布到自传社区"}
                   </button>
                   <div className="grid grid-cols-2 gap-2 border-t border-[#eaecf0] pt-3">
                     <button type="button" onClick={handlePublish} disabled={publishDisabled} className="rounded-xl border border-[#a7f3d0] py-2.5 text-sm font-medium text-[#0f9d73] transition hover:bg-[#ecfdf5] disabled:opacity-40">更新发布</button>

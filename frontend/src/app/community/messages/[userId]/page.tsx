@@ -63,11 +63,11 @@ export default function MessageThreadPage() {
   if (loading) return <div className="mx-auto max-w-lg px-5 pt-16"><LoadingSpinner label="正在打开私信..." /></div>;
 
   return (
-    <main className="page-enter min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-5 pt-8 sm:px-8 sm:pt-10">
+    <main className="page-enter min-h-screen bg-[#f7f8fa]">
+      <div className="mx-auto flex min-h-screen max-w-3xl flex-col px-5 pt-7 sm:px-8 sm:pt-10">
         <header className="border-b border-[#dfe5eb] pb-5">
-          <Link href="/community/messages" className="text-sm font-medium text-[#667085] transition hover:text-[#1f2937]">
-            返回私信
+          <Link href="/community/messages" className="inline-flex items-center gap-2 text-sm font-medium text-[#667085] transition hover:text-[#1f2937]">
+            <ArrowLeftIcon /> 返回私信
           </Link>
           <h1 className="mt-4 text-2xl font-bold text-[#1f2937]">{profile?.user.name || "私信"}</h1>
           {profile && (
@@ -81,14 +81,14 @@ export default function MessageThreadPage() {
 
         <section className="min-h-0 flex-1 space-y-3 overflow-y-auto py-5">
           {messages.length === 0 ? (
-            <p className="rounded-xl border border-[#dfe5eb] bg-[#f7f8fa] px-4 py-8 text-center text-sm text-[#667085]">
+            <p className="rounded-lg border border-[#dfe5eb] bg-white px-4 py-8 text-center text-sm text-[#667085]">
               还没有消息，发出第一句问候吧。
             </p>
           ) : messages.map((message) => {
             const mine = message.sender.id !== userId;
             return (
               <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm leading-7 shadow-sm ${mine ? "rounded-br-md bg-[#0f766e] text-white" : "rounded-bl-md bg-white text-[#344054]"}`}>
+                <div className={`max-w-[80%] rounded-lg px-4 py-3 text-sm leading-7 shadow-sm ${mine ? "bg-[#0f766e] text-white" : "border border-[#dfe5eb] bg-white text-[#344054]"}`}>
                   <p className="whitespace-pre-wrap">{message.content}</p>
                   <p className={`mt-1 text-[11px] ${mine ? "text-white/65" : "text-[#98a2b3]"}`}>
                     {new Date(message.created_at).toLocaleString("zh-CN")}
@@ -117,4 +117,8 @@ export default function MessageThreadPage() {
       </div>
     </main>
   );
+}
+
+function ArrowLeftIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>;
 }

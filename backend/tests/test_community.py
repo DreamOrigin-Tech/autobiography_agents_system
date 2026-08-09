@@ -69,6 +69,7 @@ async def test_community_publish_comment_follow_and_messages():
         post = publish.json()["post"]
         assert post["title"] == "作者 A 的自传"
         assert post["share_token"] == project.share_token
+        assert post["is_author_current_user"] is True
 
     async with AsyncClient(
         transport=transport,
@@ -78,6 +79,7 @@ async def test_community_publish_comment_follow_and_messages():
         posts = await client_b.get("/api/community/posts")
         assert posts.status_code == 200
         assert posts.json()[0]["id"] == post["id"]
+        assert posts.json()[0]["is_author_current_user"] is False
 
         followed = await client_b.post(f"/api/community/users/{user_a.id}/follow")
         assert followed.status_code == 200

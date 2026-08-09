@@ -88,43 +88,61 @@ export default function CommunityPostPage() {
   }
 
   return (
-    <main className="page-enter min-h-screen">
-      <div className="mx-auto max-w-4xl px-5 pb-20 pt-8 sm:px-8 sm:pt-10">
-        <Link href="/community" className="text-sm font-medium text-[#667085] transition hover:text-[#1f2937]">
-          返回社区
+    <main className="page-enter min-h-screen bg-[#f7f8fa]">
+      <div className="mx-auto max-w-5xl px-5 pb-20 pt-7 sm:px-8 sm:pt-10">
+        <Link href="/community" className="inline-flex items-center gap-2 text-sm font-medium text-[#667085] transition hover:text-[#1f2937]">
+          <ArrowLeftIcon /> 返回社区
         </Link>
+
         <header className="mt-5 border-b border-[#dfe5eb] pb-7">
-          <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-[#0f766e]">{post.author.name}</p>
-              <h1 className="mt-2 text-3xl font-bold text-[#1f2937] sm:text-4xl">{post.title}</h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-[#667085]">{post.excerpt}</p>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-[#98a2b3]">
-                <span>{post.chapter_count} 章</span>
-                <span>{post.comment_count} 条评论</span>
-                <span>{post.follower_count} 人关注作者</span>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-[#0f766e]">
+                <span>{post.author.name}</span>
+                {post.is_author_current_user && <span className="rounded-full bg-[#ecfdf5] px-2 py-0.5 text-[#047857]">你的作品</span>}
+              </div>
+              <h1 className="mt-3 max-w-3xl text-3xl font-bold leading-tight text-[#1f2937] sm:text-4xl">
+                {post.title}
+              </h1>
+              <p className="mt-4 max-w-3xl text-[15px] leading-8 text-[#667085]">{post.excerpt}</p>
+              <div className="mt-5 flex flex-wrap gap-2 text-xs text-[#667085]">
+                <MetaPill>{post.chapter_count} 章</MetaPill>
+                <MetaPill>{post.comment_count} 条评论</MetaPill>
+                <MetaPill>{post.follower_count} 人关注作者</MetaPill>
+                {post.published_at && <MetaPill>{new Date(post.published_at).toLocaleDateString("zh-CN")} 发布</MetaPill>}
               </div>
             </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <button type="button" onClick={handleToggleFollow} disabled={following} className="btn-outline px-4 py-2.5 text-sm">
-                {post.is_following_author ? "已关注" : "关注作者"}
-              </button>
-              <button type="button" onClick={() => router.push(`/community/messages/${post.author.id}`)} className="btn-outline px-4 py-2.5 text-sm">
-                私信作者
-              </button>
-              <Link href={`/share/${post.share_token}`} className="btn-primary px-4 py-2.5 text-sm">
+            <div className="flex shrink-0 flex-wrap gap-2 lg:justify-end">
+              {post.is_author_current_user ? (
+                <span className="inline-flex min-h-11 items-center rounded-lg border border-[#a7f3d0] bg-[#ecfdf5] px-4 py-2.5 text-sm font-medium text-[#047857]">
+                  这是你的社区自传
+                </span>
+              ) : (
+                <>
+                  <button type="button" onClick={handleToggleFollow} disabled={following} className="btn-outline min-h-11 px-4 py-2.5 text-sm">
+                    {post.is_following_author ? "已关注" : "关注作者"}
+                  </button>
+                  <button type="button" onClick={() => router.push(`/community/messages/${post.author.id}`)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[#d7e7e4] bg-white px-4 py-2.5 text-sm font-semibold text-[#115e59] transition hover:border-[#9ccfc8] hover:bg-[#f8fffd]">
+                    <MessageIcon /> 私信作者
+                  </button>
+                </>
+              )}
+              <Link href={`/share/${post.share_token}`} className="btn-primary inline-flex min-h-11 items-center justify-center px-4 py-2.5 text-sm">
                 阅读全文
               </Link>
             </div>
           </div>
         </header>
 
-        {error && <div className="mt-5 rounded-xl border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#b42318]">{error}</div>}
+        {error && <div className="mt-5 rounded-lg border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-sm text-[#b42318]">{error}</div>}
 
-        <section className="mt-8 grid gap-8 lg:grid-cols-[1fr_18rem]">
+        <section className="mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
           <div>
-            <h2 className="text-lg font-semibold text-[#1f2937]">评论</h2>
-            <form onSubmit={handleComment} className="mt-4 rounded-xl border border-[#dfe5eb] bg-white p-4">
+            <div className="flex items-center justify-between gap-4">
+              <h2 className="text-lg font-semibold text-[#1f2937]">评论</h2>
+              <span className="text-xs text-[#98a2b3]">{post.comment_count} 条</span>
+            </div>
+            <form onSubmit={handleComment} className="mt-4 rounded-lg border border-[#dfe5eb] bg-white p-4">
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
@@ -141,12 +159,12 @@ export default function CommunityPostPage() {
 
             <div className="mt-5 space-y-3">
               {post.comments.length === 0 ? (
-                <p className="rounded-xl border border-[#dfe5eb] bg-[#f7f8fa] px-4 py-6 text-center text-sm text-[#667085]">
-                  还没有评论，成为第一个读者。
+                <p className="rounded-lg border border-[#dfe5eb] bg-white px-4 py-8 text-center text-sm text-[#667085]">
+                  {post.is_author_current_user ? "还没有评论，发布后可以在这里看到读者反馈。" : "还没有评论，成为第一个读者。"}
                 </p>
               ) : post.comments.map((item) => (
-                <article key={item.id} className="rounded-xl border border-[#dfe5eb] bg-white px-4 py-3">
-                  <div className="flex items-center justify-between gap-3 text-xs">
+                <article key={item.id} className="rounded-lg border border-[#dfe5eb] bg-white px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                     <span className="font-medium text-[#344054]">{item.author.name}</span>
                     <span className="text-[#98a2b3]">{new Date(item.created_at).toLocaleString("zh-CN")}</span>
                   </div>
@@ -156,15 +174,38 @@ export default function CommunityPostPage() {
             </div>
           </div>
 
-          <aside className="rounded-xl border border-[#dfe5eb] bg-[#f7f8fa] p-4 lg:self-start">
-            <p className="text-sm font-semibold text-[#1f2937]">作者</p>
-            <p className="mt-2 text-lg font-semibold text-[#0f766e]">{post.author.name}</p>
-            <p className="mt-2 text-xs leading-6 text-[#667085]">
-              关注后可以更容易在社区里找到这位作者，也可以通过私信继续交流阅读感受。
-            </p>
+          <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+            <section className="rounded-lg border border-[#dfe5eb] bg-white p-5">
+              <p className="text-sm font-semibold text-[#1f2937]">作者</p>
+              <p className="mt-2 text-lg font-semibold text-[#0f766e]">{post.author.name}</p>
+              <p className="mt-2 text-xs leading-6 text-[#667085]">
+                {post.is_author_current_user
+                  ? "这是你发布到社区的自传。读者的评论会显示在左侧。"
+                  : "关注后可以更容易在社区里找到这位作者，也可以通过私信继续交流阅读感受。"}
+              </p>
+            </section>
+            <section className="rounded-lg border border-[#dfe5eb] bg-[#fffaf0] p-5">
+              <p className="text-sm font-semibold text-[#92400e]">阅读入口</p>
+              <p className="mt-2 text-xs leading-6 text-[#b45309]">社区页只展示摘要，完整章节会在公开阅读页中打开。</p>
+              <Link href={`/share/${post.share_token}`} className="mt-4 inline-flex text-sm font-semibold text-[#92400e] hover:underline">
+                打开全文
+              </Link>
+            </section>
           </aside>
         </section>
       </div>
     </main>
   );
+}
+
+function MetaPill({ children }: { children: React.ReactNode }) {
+  return <span className="rounded-full border border-[#dfe5eb] bg-white px-3 py-1">{children}</span>;
+}
+
+function ArrowLeftIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>;
+}
+
+function MessageIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>;
 }
