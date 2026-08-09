@@ -31,7 +31,8 @@ BACKEND_PIP_INDEX_URL="${BACKEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/
 BACKEND_PIP_TRUSTED_HOST="${BACKEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
 
 PROD_ENV_FILE="$ROOT_DIR/.env.production"
-PROD_COMPOSE=( -f docker-compose.prod.yml )
+DEV_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
+PROD_COMPOSE_FILE="$ROOT_DIR/docker-compose.prod.yml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -92,12 +93,26 @@ docker_compose() {
   fi
 }
 
+docker_compose_dev() {
+  if [[ ! -f "$DEV_COMPOSE_FILE" ]]; then
+    error "未找到 Docker 配置文件: $DEV_COMPOSE_FILE"
+    error "请确认在项目根目录执行，且已 git pull 拉取最新代码"
+    exit 1
+  fi
+  docker_compose -f "$DEV_COMPOSE_FILE" "$@"
+}
+
 docker_compose_prod() {
+  if [[ ! -f "$PROD_COMPOSE_FILE" ]]; then
+    error "未找到 Docker 配置文件: $PROD_COMPOSE_FILE"
+    error "请确认在项目根目录执行，且已 git pull 拉取最新代码"
+    exit 1
+  fi
   local env_args=()
   if [[ -f "$PROD_ENV_FILE" ]]; then
     env_args=( --env-file "$PROD_ENV_FILE" )
   fi
-  docker_compose "${PROD_COMPOSE[@]}" "${env_args[@]}" "$@"
+  docker_compose -f "$PROD_COMPOSE_FILE" "${env_args[@]}" "$@"
 }
 
 ensure_backend_env() {
@@ -251,7 +266,7 @@ start_docker() {
   info "Next.js dev 允许访问域名: ${NEXT_ALLOWED_DEV_ORIGINS}"
   info "后端 pip 依赖源: ${BACKEND_PIP_INDEX_URL}"
   warn "公网服务器请使用: ./start.sh prod"
-  docker_compose up --build -d
+  docker_compose_dev up --build -d
 
   wait_for_url "http://localhost:${BACKEND_PORT}/health" "后端" 45 || true
   wait_for_url "http://localhost:${FRONTEND_PORT}" "前端" 60 || true
@@ -286,7 +301,7 @@ start_dev() {
   info "Node.js: $(node --version)，npm: $(npm --version)"
 
   # 若 Docker 容器在跑，先提示
-  if command_exists docker && docker_compose ps --status running 2>/dev/null | grep -q .; then
+  if command_exists docker && docker_compose_dev ps --status running 2>/dev/null | grep -q .; then
     warn "检测到 Docker 服务正在运行，建议先执行 ./start.sh stop"
   fi
 
@@ -360,9 +375,9 @@ stop_services() {
       docker_compose_prod down
       stopped=true
     fi
-    if docker_compose ps --status running 2>/dev/null | grep -q .; then
+    if docker_compose_dev ps --status running 2>/dev/null | grep -q .; then
       info "停止 Docker 容器..."
-      docker_compose down
+      docker_compose_dev down
       stopped=true
     fi
   fi
@@ -392,7 +407,7 @@ show_status() {
   echo "=== Docker 容器（开发）==="
   if command_exists docker; then
     cd "$ROOT_DIR"
-    docker_compose ps 2>/dev/null || info "无开发容器"
+    docker_compose_dev ps 2>/dev/null || info "无开发容器"
   else
     info "未安装 Docker"
   fi
@@ -432,7 +447,7 @@ show_logs() {
   if [[ "${1:-}" == "prod" ]]; then
     docker_compose_prod logs -f
   else
-    docker_compose logs -f
+    docker_compose_dev logs -f
   fi
 }
 
