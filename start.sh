@@ -93,29 +93,64 @@ docker_compose() {
   fi
 }
 
-docker_compose_dev() {
-  if [[ ! -f "$DEV_COMPOSE_FILE" ]]; then
-    error "未找到 Docker 开发配置: $DEV_COMPOSE_FILE"
-    if [[ -f "$PROD_COMPOSE_FILE" ]]; then
+is_snap_docker() {
+  local docker_bin
+  docker_bin="$(command -v docker 2>/dev/null || true)"
+  [[ -n "$docker_bin" ]] && readlink -f "$docker_bin" 2>/dev/null | grep -q /snap/
+}
+
+verify_compose_access() {
+  local compose_file="$1"
+  local label="${2:-Docker Compose}"
+
+  if [[ ! -f "$compose_file" ]]; then
+    error "未找到 ${label} 配置: $compose_file"
+    if [[ -f "$PROD_COMPOSE_FILE" && "$compose_file" != "$PROD_COMPOSE_FILE" ]]; then
       info "公网/生产服务器请使用: ./start.sh prod"
     fi
     info "请进入完整项目目录并执行: git pull"
     exit 1
   fi
-  docker_compose -f "$DEV_COMPOSE_FILE" "$@"
+
+  if [[ ! -r "$compose_file" ]]; then
+    error "当前用户无法读取: $compose_file"
+    exit 1
+  fi
+
+  local compose_err
+  if ! compose_err="$(docker_compose --project-directory "$ROOT_DIR" -f "$compose_file" config 2>&1 >/dev/null)"; then
+    error "Docker 无法加载 ${label} 配置: $compose_file"
+    if [[ "$compose_err" == *"no such file or directory"* ]]; then
+      warn "文件在磁盘上存在，但 Docker 客户端读不到（常见于 Snap 版 Docker + /opt 目录）"
+      if is_snap_docker; then
+        info "建议将项目移到 /root 或 /home 下，例如:"
+        info "  mv ${ROOT_DIR} /root/autobiography_agents_system && cd /root/autobiography_agents_system"
+        info "或改装 apt 版 Docker: apt install docker.io docker-compose-v2"
+      else
+        info "请检查 Docker 安装方式，或确认 Docker 守护进程可访问 ${ROOT_DIR}"
+      fi
+    else
+      warn "$compose_err"
+    fi
+    if [[ -f "$PROD_COMPOSE_FILE" && "$compose_file" != "$PROD_COMPOSE_FILE" ]]; then
+      info "公网服务器请改用: ./start.sh prod"
+    fi
+    exit 1
+  fi
+}
+
+docker_compose_dev() {
+  verify_compose_access "$DEV_COMPOSE_FILE" "开发环境"
+  docker_compose --project-directory "$ROOT_DIR" -f "$DEV_COMPOSE_FILE" "$@"
 }
 
 docker_compose_prod() {
-  if [[ ! -f "$PROD_COMPOSE_FILE" ]]; then
-    error "未找到 Docker 配置文件: $PROD_COMPOSE_FILE"
-    error "请确认在项目根目录执行，且已 git pull 拉取最新代码"
-    exit 1
-  fi
+  verify_compose_access "$PROD_COMPOSE_FILE" "生产环境"
   local env_args=()
   if [[ -f "$PROD_ENV_FILE" ]]; then
     env_args=( --env-file "$PROD_ENV_FILE" )
   fi
-  docker_compose -f "$PROD_COMPOSE_FILE" "${env_args[@]}" "$@"
+  docker_compose --project-directory "$ROOT_DIR" -f "$PROD_COMPOSE_FILE" "${env_args[@]}" "$@"
 }
 
 ensure_backend_env() {
@@ -240,7 +275,11 @@ start_prod() {
   warn "请确认防火墙已开放 ${FRONTEND_PORT}、${BACKEND_PORT} 端口"
 
   export BACKEND_PIP_INDEX_URL BACKEND_PIP_TRUSTED_HOST
+  export DOCKER_PYTHON_IMAGE="${DOCKER_PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim}"
+  export DOCKER_NODE_IMAGE="${DOCKER_NODE_IMAGE:-docker.m.daocloud.io/library/node:20-alpine}"
   info "后端 pip 依赖源: ${BACKEND_PIP_INDEX_URL}"
+  info "Docker Python 镜像: ${DOCKER_PYTHON_IMAGE}"
+  info "Docker Node 镜像: ${DOCKER_NODE_IMAGE}"
   info "构建并启动生产容器..."
   docker_compose_prod up --build -d
 
@@ -256,6 +295,12 @@ start_docker() {
   if ! command_exists docker; then
     error "未安装 Docker，请安装 Docker Desktop 或使用: ./start.sh local"
     exit 1
+  fi
+
+  if [[ "$ROOT_DIR" == /opt/* ]]; then
+    warn "检测到项目在 /opt 下，Snap 版 Docker 可能无法读取 compose 文件"
+    info "公网服务器建议使用: ./start.sh prod"
+    info "若仍失败，请将项目移到 /root 或 /home 目录"
   fi
 
   ensure_backend_env

@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend
       args:
+        PYTHON_IMAGE: ${DOCKER_PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.11-slim}
         PIP_INDEX_URL: ${BACKEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}
         PIP_TRUSTED_HOST: ${BACKEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}
     restart: unless-stopped
@@ -24,6 +25,7 @@ services:
     build:
       context: ./frontend
       args:
+        NODE_IMAGE: ${DOCKER_NODE_IMAGE:-docker.m.daocloud.io/library/node:20-alpine}
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://jiumozhi.tech:6986/api}
         NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://jiumozhi.tech:6985}
         NEXT_PUBLIC_DEV_AUTH_BYPASS: "false"
