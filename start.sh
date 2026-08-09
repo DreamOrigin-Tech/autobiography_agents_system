@@ -95,8 +95,11 @@ docker_compose() {
 
 docker_compose_dev() {
   if [[ ! -f "$DEV_COMPOSE_FILE" ]]; then
-    error "未找到 Docker 配置文件: $DEV_COMPOSE_FILE"
-    error "请确认在项目根目录执行，且已 git pull 拉取最新代码"
+    error "未找到 Docker 开发配置: $DEV_COMPOSE_FILE"
+    if [[ -f "$PROD_COMPOSE_FILE" ]]; then
+      info "公网/生产服务器请使用: ./start.sh prod"
+    fi
+    info "请进入完整项目目录并执行: git pull"
     exit 1
   fi
   docker_compose -f "$DEV_COMPOSE_FILE" "$@"
@@ -288,6 +291,15 @@ start_dev() {
   setup_node_runtime
   if ! command_exists node || ! command_exists npm; then
     if command_exists docker; then
+      if [[ ! -f "$DEV_COMPOSE_FILE" ]]; then
+        error "本机未安装 Node.js/npm，且缺少 docker-compose.yml"
+        if [[ -f "$PROD_COMPOSE_FILE" ]]; then
+          info "服务器请改用: ./start.sh prod"
+        else
+          info "请确认代码已完整部署: git pull 或重新 git clone"
+        fi
+        exit 1
+      fi
       warn "未找到本机 Node.js/npm，自动切换到 Docker 开发模式"
       start_docker
       return
